@@ -5,6 +5,7 @@
 #include "patch.h"
 #include "find.h"
 #include "common.h"
+#include "dlp.h"
 //#include "value_bits.h"
 #include "cardengine_header_arm9.h"
 #include "unpatched_funcs.h"
@@ -390,19 +391,26 @@ static bool patchCardSetDma(cardengineArm9* ce9, const tNDSHeader* ndsHeader, co
 }
 
 bool softResetMb = false;
+bool dlpStationForwarder = false;
 static void patchReset(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const module_params_t* moduleParams) {
 	softResetMb = false;
+	dlpStationForwarder = false;
 	const char* romTid = getRomTid(ndsHeader);
-	if (strcmp(romTid, "NTRJ") == 0 || strncmp(romTid, "HND", 3) == 0 || strncmp(romTid, "HNE", 3) == 0) {
+	if (dlpSessionActive || strcmp(romTid, "NTRJ") == 0 || strncmp(romTid, "HND", 3) == 0 || strncmp(romTid, "HNE", 3) == 0) {
 		u32* offset = findSrlStartOffset9(ndsHeader);
 
 		if (offset) {
+			const u32 handoffTag = (offset[0] == 0xE3A00000) ? DLP_STATION_HANDOFF : 0x4C525344;
 			// Patch
-			tonccpy(offset, ce9->patches->reset_arm9, 0x40);
+			offset[0] = 0xE59F1000; // ldr r1, =DSRL
+			offset[1] = 0xE59FF000; // ldr pc, =reset_arm9
+			offset[2] = handoffTag;
+			offset[3] = (u32)ce9->patches->reset_arm9;
 			/* dbg_printf("srlStart location : ");
 			dbg_hexa((u32)offset);
 			dbg_printf("\n\n"); */
 			softResetMb = true;
+			dlpStationForwarder = (handoffTag == DLP_STATION_HANDOFF);
 		}
 	}
 
@@ -834,6 +842,12 @@ u32 patchCardNdsArm9(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const mod
 
 	if (buttonsRemapped) {
 		patchKeyInputs(ndsHeader, moduleParams);
+	}
+
+	if (dlpPhysicalSlot1Active) {
+		fixForDifferentBios(ce9, ndsHeader, false);
+		patchReset(ce9, ndsHeader, moduleParams);
+		return ERR_NONE;
 	}
 
 	if (isPawsAndClaws(ndsHeader)) {

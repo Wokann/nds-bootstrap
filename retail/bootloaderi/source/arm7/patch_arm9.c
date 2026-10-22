@@ -5,6 +5,7 @@
 #include "patch.h"
 #include "find.h"
 #include "common.h"
+#include "dlp.h"
 #include "value_bits.h"
 #include "cardengine_header_arm9.h"
 #include "unpatched_funcs.h"
@@ -865,7 +866,7 @@ void patchMobiclipFrameDraw(const tNDSHeader* ndsHeader, const module_params_t* 
 
 static void patchReset(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const module_params_t* moduleParams) {
 	const char* romTid = getRomTid(ndsHeader);
-	if (ndsHeader->unitCode == 0 && (strcmp(romTid, "NTRJ") == 0 || strncmp(romTid, "HND", 3) == 0 || strncmp(romTid, "HNE", 3) == 0)) {
+	if (ndsHeader->unitCode == 0 && (dlpSessionActive || strcmp(romTid, "NTRJ") == 0 || strncmp(romTid, "HND", 3) == 0 || strncmp(romTid, "HNE", 3) == 0)) {
 		u32* offset = patchOffsetCache.srlStartOffset9;
 
 		if (!patchOffsetCache.srlStartOffsetChecked) {
@@ -875,8 +876,17 @@ static void patchReset(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const m
 		}
 
 		if (offset) {
+			const u32 handoffTag = (offset[0] == 0xE3A00000) ? DLP_STATION_HANDOFF : 0x4C525344;
 			// Patch
-			tonccpy(offset, ce9->patches->reset_arm9, 0x40);
+			if (*(u16*)offset == 0xB510) {
+				offset[0] = 0x49012000; // movs r0, #0; ldr r1, =handoffTag
+				offset[1] = 0x47184B01; // ldr r3, =newReset; bx r3
+			} else {
+				offset[0] = 0xE59F1000; // ldr r1, =handoffTag
+				offset[1] = 0xE59FF000; // ldr pc, =reset_arm9
+			}
+			offset[2] = handoffTag;
+			offset[3] = (u32)ce9->patches->reset_arm9;
 			dbg_printf("srlStart location : ");
 			dbg_hexa((u32)offset);
 			dbg_printf("\n\n");
@@ -3220,6 +3230,12 @@ u32 patchCardNdsArm9(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const mod
 
 	if (buttonsRemapped) {
 		patchKeyInputs(ndsHeader, moduleParams);
+	}
+
+	if (dlpPhysicalSlot1Active || dlpIsInitialReceiver(ndsHeader->gameCode)) {
+		fixForDifferentBios(ce9, ndsHeader, false, usesCloneboot);
+		patchReset(ce9, ndsHeader, moduleParams);
+		return ERR_NONE;
 	}
 
 	if (isPawsAndClaws(ndsHeader)) {

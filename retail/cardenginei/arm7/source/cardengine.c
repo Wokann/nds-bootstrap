@@ -43,6 +43,13 @@
 #include "fpsAdjust.h"
 #include "nds_header.h"
 #include "igm_text.h"
+#include "dlp.h"
+#include "cardengine_header_arm9.h"
+
+bool dlpSessionActive = false;
+bool dlpPhysicalSlot1Active = false;
+bool dlpVirtualSlot1Active = false;
+bool dlpVirtualSlot1Empty = false;
 
 #ifndef TWLSDK
 // Patcher
@@ -80,6 +87,10 @@
 #define isDlp BIT(21)
 #define useColorLut BIT(22)
 #define clearRamOnReset BIT(23)
+#define saveRelocation BIT(24)
+#define dlpReceiverOnFlashcard BIT(26)
+#define dlpSession BIT(27)
+#define dlpVirtualSlot1 BIT(28)
 #define i2cBricked BIT(30)
 #define scfgLocked BIT(31)
 
@@ -283,15 +294,28 @@ static void driveInitialize(void) {
 		}
 		FAT_InitFiles(false, false);
 	}
-	if (((valueBits & gameOnFlashcard) && !(valueBits & ROMinRAM)) || (valueBits & saveOnFlashcard)) {
+	bool dldiInited = ((valueBits & gameOnFlashcard) && !(valueBits & ROMinRAM)) || (valueBits & (saveOnFlashcard | bootstrapOnFlashcard));
+	if (dldiInited) {
 		FAT_InitFiles(false, true);
 	}
 
-	getFileFromCluster(&patchOffsetCacheFile, patchOffsetCacheFileCluster, (valueBits & gameOnFlashcard));
-	getFileFromCluster(&ramDumpFile, ramDumpCluster, (valueBits & bootstrapOnFlashcard));
-	getFileFromCluster(&srParamsFile, srParamsCluster, (valueBits & gameOnFlashcard));
-	getFileFromCluster(&screenshotFile, screenshotCluster, (valueBits & bootstrapOnFlashcard));
 	getFileFromCluster(&pageFile, pageFileCluster, (valueBits & bootstrapOnFlashcard));
+	bool receiverOnFlashcard = (valueBits & gameOnFlashcard);
+#ifndef TWLSDK
+	if (valueBits & dlpSession) {
+		DlpSession session = {0};
+		if (fileRead((char*)&session, &pageFile, DLP_SESSION_PAGE_OFFSET, sizeof(session)) != sizeof(session)) session.magic = 0;
+		if (!dlpSessionValid(&session)) { dbg_printf("DLP: invalid session\n"); while (1); }
+		receiverOnFlashcard = (valueBits & dlpReceiverOnFlashcard);
+		if (!dldiInited && (receiverOnFlashcard || (session.flags & (DLP_VIRTUAL_SLOT1_ROM_FAT | DLP_VIRTUAL_SLOT1_SAVE_FAT)))) {
+			FAT_InitFiles(false, true);
+		}
+	}
+#endif
+	getFileFromCluster(&patchOffsetCacheFile, patchOffsetCacheFileCluster, receiverOnFlashcard);
+	getFileFromCluster(&ramDumpFile, ramDumpCluster, (valueBits & bootstrapOnFlashcard));
+	getFileFromCluster(&srParamsFile, srParamsCluster, receiverOnFlashcard);
+	getFileFromCluster(&screenshotFile, screenshotCluster, (valueBits & bootstrapOnFlashcard));
 	getFileFromCluster(&manualFile, manualCluster, (valueBits & bootstrapOnFlashcard));
 
 	//romFile = getFileFromCluster(fileCluster);
@@ -345,6 +369,9 @@ static void initialize(void) {
 		sixInHeader = true;
 	}
 	#else
+	// The downloaded SDK clears HW_CARD_ROM_HEADER during ARM7 startup.
+	if (valueBits & dlpVirtualSlot1) dlpVirtualSlot1SetCardHeader((const void*)NDS_HEADER_POKEMON, !!(valueBits & isSdk5));
+
 	if (valueBits & isSdk5) {
 		sharedAddr = (vu32*)CARDENGINE_SHARED_ADDRESS_SDK5;
 		ndsHeader = (tNDSHeader*)NDS_HEADER_SDK5;
@@ -455,24 +482,92 @@ static bool cardReadRAM(u8* dst, u32 src, u32 len/*, int romPartNo*/) {
 	return true;
 }
 
+#ifndef TWLSDK
+static void writeDlpFile(const char* buffer, aFile* file, u32 offset, u32 length) {
+	const u32 written = fileWrite(buffer, file, offset, length);
+	if ((valueBits & dlpSession) && written != length) while (1);
+}
+
+static void bindDlpSession(void) {
+	DlpSession session = {0};
+	if (fileRead((char*)&session, &pageFile, DLP_SESSION_PAGE_OFFSET, sizeof(session)) != sizeof(session)) session.magic = 0;
+	dlpSetSession(&session, true);
+	if (!dlpSessionActive && (valueBits & dlpSession)) { dbg_printf("DLP: invalid session\n"); while (1); }
+	valueBits &= ~dlpVirtualSlot1;
+	if (dlpVirtualSlot1Active) valueBits |= dlpVirtualSlot1;
+	if (!dlpSessionActive) return;
+	((cardengineArm9*)CARDENGINEI_ARM9_LOCATION)->valueBits |= BIT(23);
+	if (dlpVirtualSlot1Active) {
+		fileCluster = session.romCluster;
+		saveCluster = session.saveCluster;
+		saveSize = session.saveSize;
+		valueBits &= ~(gameOnFlashcard | saveOnFlashcard | ROMinRAM);
+		if (session.flags & DLP_VIRTUAL_SLOT1_ROM_FAT) valueBits |= gameOnFlashcard;
+		if (session.flags & DLP_VIRTUAL_SLOT1_SAVE_FAT) valueBits |= saveOnFlashcard;
+		valueBits |= saveRelocation;
+		if (dlpVirtualSlot1Empty) {
+			toncset(romFile, 0, sizeof(*romFile));
+			toncset(savFile, 0, sizeof(*savFile));
+			toncset((void*)NDS_HEADER_POKEMON, 0xFF, 0x160);
+		} else {
+			getFileFromCluster(romFile, fileCluster, !!(session.flags & DLP_VIRTUAL_SLOT1_ROM_FAT));
+			getFileFromCluster(savFile, saveCluster, !!(session.flags & DLP_VIRTUAL_SLOT1_SAVE_FAT));
+			if (fileRead((char*)NDS_HEADER_POKEMON, romFile, 0, 0x160) != 0x160) { dbg_printf("DLP: virtual header read failed\n"); while (1); }
+		}
+		romMapLines = 0;
+		cardengineArm9* ce9 = (cardengineArm9*)CARDENGINEI_ARM9_LOCATION;
+		ce9->fileCluster = fileCluster;
+		ce9->saveCluster = saveCluster;
+		ce9->saveSize = saveSize;
+		ce9->valueBits &= ~(BIT(0) | BIT(1) | BIT(6) | BIT(12) | BIT(14) | BIT(17));
+		if (session.flags & DLP_VIRTUAL_SLOT1_SAVE_FAT) ce9->valueBits |= BIT(0);
+		ce9->valueBits &= ~BIT(24);
+		if (dlpVirtualSlot1Empty) ce9->valueBits |= BIT(24);
+		ce9->valueBits |= BIT(23); // Reinitialize the ARM9 cache on every handoff.
+		ce9->romMapLines = 0;
+		toncset(ce9->romPartSrc, 0, sizeof(ce9->romPartSrc));
+		toncset(ce9->romPartSrcEnd, 0, sizeof(ce9->romPartSrcEnd));
+		toncset(ce9->asyncDataSrc, 0, sizeof(ce9->asyncDataSrc));
+		toncset(ce9->asyncDataSrcEnd, 0, sizeof(ce9->asyncDataSrcEnd));
+		const tNDSHeader* virtualHeader = (tNDSHeader*)NDS_HEADER_POKEMON;
+		ce9->romPaddingSize = getRomPaddingSize(virtualHeader->romSize ? virtualHeader->romSize : session.romSize, virtualHeader->deviceSize);
+	}
+	++session.generation;
+	session.checksum = dlpSessionChecksum(&session);
+	writeDlpFile((char*)&session, &pageFile, DLP_SESSION_PAGE_OFFSET, sizeof(session));
+}
+#endif
+
 void reset(const bool downloadedSrl) {
 	register int i, reg;
+#ifndef TWLSDK
+	// ARM9 must finish copying / unwrapping the executable and flushing its
+	// cache before ARM7 scans it or stages it in the pagefile.
+	if (downloadedSrl || (valueBits & isDlp)) {
+		while (sharedAddr[3] != 0x4C525344 && sharedAddr[3] != 0x52534554);
+	}
+#endif
 
 #ifndef TWLSDK
 	u32 resetParam = ((valueBits & isSdk5) ? RESET_PARAM_SDK5 : RESET_PARAM);
-	if (((valueBits & isDlp) && *(u32*)(NDS_HEADER_SDK5+0xC) == 0) || (valueBits & slowSoftReset) || (*(u32*)(resetParam+0xC) > 0 && (valueBits & isSdk5))) {
+	if (((valueBits & isDlp) && *(u32*)(NDS_HEADER_SDK5+0xC) == 0) || (valueBits & slowSoftReset) || sharedAddr[2] == DLP_STATION_HANDOFF || (*(u32*)(resetParam+0xC) > 0 && (valueBits & isSdk5))) {
 		REG_MASTER_VOLUME = 0;
 		int oldIME = enterCriticalSection();
 		//driveInitialize();
 		if (downloadedSrl) {
+			DlpStageImage image = {(u32)ndsHeader->arm9destination, 0x022C0000};
+			if (sharedAddr[2] == DLP_STATION_HANDOFF) {
+				if (dlpStageStation((u32*)ndsHeader, (u32*)0x023FE840,
+				                    (u8*)0x023FE800, (u8*)0x027FFC42, &image) < 0) while (1);
+			}
 			*(u32*)resetParam = 0;
 			*(u32*)(resetParam+8) = 0x44414F4C; // 'LOAD'
-			fileWrite((char*)ndsHeader, &pageFile, 0x2BFE00, 0x160);
-			fileWrite((char*)ndsHeader->arm9destination, &pageFile, 0x14000, ndsHeader->arm9binarySize);
-			fileWrite((char*)ndsHeader->arm7destination, &pageFile, 0x2C0000, ndsHeader->arm7binarySize);
+			writeDlpFile((char*)ndsHeader, &pageFile, 0x2BFE00, 0x160);
+			writeDlpFile((char*)image.arm9Source, &pageFile, 0x14000, ndsHeader->arm9binarySize);
+			writeDlpFile((char*)image.arm7Source, &pageFile, 0x2C0000, ndsHeader->arm7binarySize);
 		}
-		fileWrite((char*)resetParam, &srParamsFile, 0, 0x10);
-		fileWrite((char*)resetParam+0x20, &srParamsFile, 0x10, 0x40);
+		writeDlpFile((char*)resetParam, &srParamsFile, 0, 0x10);
+		writeDlpFile((char*)resetParam+0x20, &srParamsFile, 0x10, 0x40);
 		toncset((u32*)0x02000000, 0, 0x400);
 		*(u32*)0x02000000 = BIT(3);
 		*(u32*)0x02000004 = 0x54455352; // 'RSET'
@@ -555,6 +650,7 @@ void reset(const bool downloadedSrl) {
 		}
 
 		moduleParams = getModuleParams(ndsHeader);
+		if (!moduleParams) { dbg_printf("DLP: module parameters missing\n"); while (1); }
 		/*dbg_printf("sdk_version: ");
 		dbg_hexa(moduleParams->sdk_version);
 		dbg_printf("\n");*/ 
@@ -570,22 +666,26 @@ void reset(const bool downloadedSrl) {
 		} */
 
 		ensureBinaryDecompressed(ndsHeader, moduleParams);
+		if ((valueBits & isDlp) || downloadedSrl) bindDlpSession();
 
 		const bool buttonsRemappedBool = buttonsRemapped();
 
-		patchCardNdsArm9(
+		u32 patchResult = patchCardNdsArm9(
 			(cardengineArm9*)CARDENGINEI_ARM9_LOCATION,
 			ndsHeader,
 			moduleParams,
 			1,
 			buttonsRemappedBool
 		);
-		patchCardNdsArm7(
+		if (dlpSessionActive && patchResult != ERR_NONE) { dbg_printf("DLP: ARM9 patch failed\n"); while (1); }
+		patchResult = patchCardNdsArm7(
 			(cardengineArm7*)ce7,
 			ndsHeader,
 			moduleParams,
 			buttonsRemappedBool
 		);
+
+		if (dlpSessionActive && patchResult != ERR_NONE) { dbg_printf("DLP: ARM7 patch failed\n"); while (1); }
 
 		hookNdsRetailArm7(
 			(cardengineArm7*)ce7,
@@ -598,10 +698,10 @@ void reset(const bool downloadedSrl) {
 
 		extern u32 iUncompressedSize;
 
-		fileWrite((char*)ndsHeader->arm9destination, &pageFile, 0x14000, iUncompressedSize);
-		fileWrite((char*)ndsHeader->arm7destination, &pageFile, 0x2C0000, ndsHeader->arm7binarySize);
-		fileWrite((char*)&iUncompressedSize, &pageFile, 0x5FFFF0, sizeof(u32));
-		fileWrite((char*)&ndsHeader->arm7binarySize, &pageFile, 0x5FFFF4, sizeof(u32));
+		writeDlpFile((char*)ndsHeader->arm9destination, &pageFile, 0x14000, iUncompressedSize);
+		writeDlpFile((char*)ndsHeader->arm7destination, &pageFile, 0x2C0000, ndsHeader->arm7binarySize);
+		writeDlpFile((char*)&iUncompressedSize, &pageFile, 0x5FFFF0, sizeof(u32));
+		writeDlpFile((char*)&ndsHeader->arm7binarySize, &pageFile, 0x5FFFF4, sizeof(u32));
 		/* } else {
 			*(u32*)ARM9_DEC_SIZE_LOCATION = iUncompressedSize;
 			ndmaCopyWordsAsynch(0, ndsHeader->arm9destination, (char*)ndsHeader->arm9destination+0x400000, *(u32*)ARM9_DEC_SIZE_LOCATION);
@@ -611,6 +711,10 @@ void reset(const bool downloadedSrl) {
 		if ((valueBits & isDlp) && !(valueBits & isSdk5)) {
 			tonccpy((u8*)0x027FF000, (u8*)0x02FFF000, 0x1000);
 		}
+		if (dlpVirtualSlot1Active && !dlpVirtualSlot1Empty
+			&& fileRead((char*)NDS_HEADER_POKEMON, romFile, 0, 0x160) != 0x160) { dbg_printf("DLP: virtual header read failed\n"); while (1); }
+		if (dlpVirtualSlot1Empty) toncset((void*)NDS_HEADER_POKEMON, 0xFF, 0x160);
+		if (dlpVirtualSlot1Active) dlpVirtualSlot1SetCardHeader((const void*)NDS_HEADER_POKEMON, !!(valueBits & isSdk5));
 		valueBits &= ~isDlp;
 	} else {
 		//driveInitialize();
@@ -1993,8 +2097,8 @@ void myIrqHandlerVBlank(void) {
 		ramDumpTimer = 0;
 	} */
 
-	if (sharedAddr[3] == (vu32)0x52534554) {
-		reset(false);
+	if (sharedAddr[3] == (vu32)0x52534554 || sharedAddr[3] == (vu32)0x4C525344) {
+		reset(sharedAddr[3] == (vu32)0x4C525344);
 	}
 
 	if ( 0 == (REG_KEYINPUT & (KEY_L | KEY_R | KEY_START | KEY_SELECT))) {
@@ -2257,7 +2361,50 @@ void patchKeyInputs(u16* extKeyInputDst, u16 extKeyInput) {
 // ARM7 Redirected functions
 //
 
+// Virtual saves wrap at the file boundary and report incomplete transfers.
+static bool dlpSave(u32 offset, void* data, u32 len, const u32 operation) {
+	if (!saveSize || len > saveSize || (!(valueBits & saveOnFlashcard) && isSdEjected())) return false;
+	if (!len) return true;
+	if (!lockMutex(&saveMutex)) return false;
+	if (operation == 1) {
+		saveTimer = 1;
+		if (valueBits & delayWrites) {
+			if (*(int*)((valueBits & isSdk5) ? 0x02FFFC3C : 0x027FFC3C) >= 60*2) {
+				valueBits &= ~delayWrites;
+			} else {
+				waitFrames(1);
+			}
+		}
+	}
+	sdmmc_set_ndma_slot(4);
+	offset %= saveSize;
+	char* buffer = (char*)data;
+	u32 verifyBuffer[8];
+	bool result = true;
+	while (len && result) {
+		u32 count = saveSize - offset;
+		if (count > len) count = len;
+		if (operation == 2) {
+			if (count > sizeof(verifyBuffer)) count = sizeof(verifyBuffer);
+			result = fileRead((char*)verifyBuffer, savFile, offset, count) == count;
+			for (u32 i = 0; result && i < count; i++) result = ((char*)verifyBuffer)[i] == buffer[i];
+		} else if (operation == 1) {
+			result = fileWrite(buffer, savFile, offset, count) == count;
+		} else {
+			result = fileRead(buffer, savFile, offset, count) == count;
+		}
+		offset += count;
+		if (offset == saveSize) offset = 0;
+		buffer += count;
+		len -= count;
+	}
+	sdmmc_set_ndma_slot(0);
+	unlockMutex(&saveMutex);
+	return result;
+}
+
 bool eepromProtect(void) {
+	if (dlpVirtualSlot1Empty) return false;
 	#ifdef DEBUG
 	dbg_printf("\narm7 eepromProtect\n");
 	#endif
@@ -2266,6 +2413,8 @@ bool eepromProtect(void) {
 }
 
 bool eepromRead(u32 src, void *dst, u32 len) {
+	if (dlpVirtualSlot1Empty) { toncset(dst, 0xFF, len); return false; }
+	if (dlpVirtualSlot1Active) return dlpSave(src, dst, len, 0);
 	#ifdef DEBUG
 	dbg_printf("\narm7 eepromRead\n");
 
@@ -2315,6 +2464,8 @@ bool eepromRead(u32 src, void *dst, u32 len) {
 }
 
 bool eepromPageWrite(u32 dst, const void *src, u32 len) {
+	if (dlpVirtualSlot1Empty) return false;
+	if (dlpVirtualSlot1Active) return dlpSave(dst, (void*)src, len, 1);
 	#ifdef DEBUG
 	dbg_printf("\narm7 eepromPageWrite\n");
 
@@ -2380,6 +2531,8 @@ bool eepromPageProg(u32 dst, const void *src, u32 len) {
 }
 
 bool eepromPageVerify(u32 dst, const void *src, u32 len) {
+	if (dlpVirtualSlot1Empty) return false;
+	if (dlpVirtualSlot1Active) return dlpSave(dst, (void*)src, len, 2);
 	#ifdef DEBUG
 	dbg_printf("\narm7 eepromPageVerify\n");
 
@@ -2395,6 +2548,7 @@ bool eepromPageVerify(u32 dst, const void *src, u32 len) {
 }
 
 bool eepromPageErase (u32 dst) {
+	if (dlpVirtualSlot1Active) return false;
 	#ifdef DEBUG	
 	dbg_printf("\narm7 eepromPageErase\n");	
 	#endif	
@@ -2467,11 +2621,12 @@ Existing/known ROM IDs are:
   FFh,FFh,FFh,FFh None (no cartridge inserted)
 */
 u32 cardId(void) {
+	if (dlpVirtualSlot1Empty) return 0xFFFFFFFF;
 	#ifdef DEBUG	
 	dbg_printf("\ncardId\n");
 	#endif
     
-    u32 cardid = getChipId(ndsHeader, moduleParams);
+    u32 cardid = getChipId(dlpVirtualSlot1Active ? (tNDSHeader*)NDS_HEADER_POKEMON : ndsHeader, moduleParams);
 
     //if (!cardInitialized && strncmp(getRomTid(ndsHeader), "BO5", 3) == 0)  cardid = 0xE080FF80; // golden sun
     //if (!cardInitialized && strncmp(getRomTid(ndsHeader), "BO5", 3) == 0)  cardid = 0x80FF80E0; // golden sun
@@ -2486,6 +2641,7 @@ u32 cardId(void) {
 }
 
 bool cardRead(u32 dma, u32 src, void *dst, u32 len) {
+	if (dlpVirtualSlot1Empty) { toncset(dst, 0xFF, len); return false; }
 	#ifdef DEBUG	
 	dbg_printf("\narm7 cardRead\n");	
 
@@ -2507,9 +2663,10 @@ bool cardRead(u32 dma, u32 src, void *dst, u32 len) {
 		#ifdef DEBUG	
 		nocashMessage("fileRead romFile");
 		#endif	
-		fileRead(dst, romFile, src, len);
+		const bool read = fileRead(dst, romFile, src, len) == len;
 		//ndmaUsed = true;
 		cardReadLED(false, false);    // After loading is done, turn off LED for card read indicator
+		if (dlpVirtualSlot1Active) return read;
 	}
 
 	return true;

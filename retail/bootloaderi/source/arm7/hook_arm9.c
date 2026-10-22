@@ -4,6 +4,7 @@
 #include "debug_file.h"
 #include "hook.h"
 #include "common.h"
+#include "dlp.h"
 #include "patch.h"
 #include "find.h"
 #include "nds_header.h"
@@ -508,6 +509,8 @@ int hookNdsRetailArm9(
     u32* ipcSyncHandler = hookLocation + 16;
     u32* cardCompletionIrq = hookLocation + 19;*/
     
+	if (dlpSessionActive) ce9->valueBits |= BIT(23);
+	if (dlpVirtualSlot1Empty) ce9->valueBits |= BIT(24);
     ce9->irqTable   = tableAddr;
 
 	nocashMessage("ERR_NONE");

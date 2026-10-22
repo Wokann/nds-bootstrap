@@ -19,6 +19,8 @@
 
 ------------------------------------------------------------------*/
 #include <stdio.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include <stdlib.h> // free
 #include <string.h> // memcpy
 #include <nds/interrupts.h>
@@ -39,6 +41,7 @@
 #include "nds_loader_arm9.h"
 #include "locations.h"
 #include "load_crt0.h"
+#include "dlp.h"
 #include "cardengine_header_arm7.h"
 #include "version.h"
 
@@ -235,6 +238,73 @@ static bool dldiPatchLoader (data_t *binData, u32 binSize, bool clearBSS, bool a
 	return true;
 }
 
+static bool prepareDlpReload(const void* loader, const char* pageFilePath) {
+	DlpSession session;
+	FILE* page = fopen(pageFilePath, "rb+");
+	if (!page) return false;
+	if (fseek(page, DLP_SESSION_PAGE_OFFSET, SEEK_SET)
+		|| fread(&session, 1, sizeof(session), page) != sizeof(session)
+		|| !dlpSessionValid(&session)) {
+		fclose(page);
+		return false;
+	}
+
+	const char* path = "fat:/_nds/nds-bootstrap/dlp-reload.nds";
+	struct stat info;
+	if (stat(path, &info)) {
+		if (errno != ENOENT) return fclose(page) == 0;
+	} else {
+		if (((session.flags & DLP_VIRTUAL_SLOT1_ROM_FAT) && session.romCluster == info.st_ino)
+			|| ((session.flags & DLP_VIRTUAL_SLOT1_SAVE_FAT) && session.saveCluster == info.st_ino)) {
+			fclose(page);
+			return false;
+		}
+		// Only replace a file created as a reload cache.
+		FILE* previous = fopen(path, "rb");
+		char title[16];
+		const bool owned = previous && fread(title, 1, sizeof(title), previous) == sizeof(title)
+			&& !memcmp(title, "DLP RELOAD  DLPR", sizeof(title));
+		const int closed = previous ? fclose(previous) : 0;
+		if (!owned || closed) return fclose(page) == 0;
+	}
+	FILE* file = fopen(path, "wb");
+	if (!file) return fclose(page) == 0;
+	u32 header[0x200/4] = {0};
+	memcpy(header, "DLP RELOAD  DLPR", 16);
+	header[8] = DLP_RELOAD_ARM9_OFFSET;
+	header[9] = header[10] = 0x02370000;
+	header[11] = 12;
+	header[12] = DLP_RELOAD_ARM7_OFFSET;
+	header[13] = 0x06000000;
+	header[14] = LOAD_CRT0_LOCATION;
+	header[15] = 0x40000;
+	/* ARM7's normal CRT starts the ARM9 loader by replacing 0x02FFFE24. */
+	const u32 waitForArm7[] = {0xE59F0000, 0xE590F000, 0x02FFFE24};
+	const bool written = fwrite(header, 1, sizeof(header), file) == sizeof(header)
+		&& fwrite(waitForArm7, 1, sizeof(waitForArm7), file) == sizeof(waitForArm7)
+		&& !fseek(file, DLP_RELOAD_ARM7_OFFSET, SEEK_SET)
+		&& fwrite(loader, 1, 0x40000, file) == 0x40000
+		&& fwrite((void*)CARDENGINE_ARM9_LOCATION_BUFFERED, 1, 0x10000, file) == 0x10000
+		&& fwrite((void*)CARDENGINE_ARM7_LOCATION_BUFFERED, 1, 0x1080, file) == 0x1080
+		&& fwrite((void*)CHEAT_ENGINE_LOCATION_B4DS_BUFFERED, 1, 0x400, file) == 0x400
+		&& !fseek(file, DLP_RELOAD_FILE_SIZE-1, SEEK_SET) && fputc(0, file) != EOF;
+	const int closed = fclose(file);
+	bool result = true;
+	if (written && !closed && !stat(path, &info)
+		&& info.st_size == DLP_RELOAD_FILE_SIZE && info.st_ino >= 2
+		&& info.st_ino < 0x0FFFFFF0u) {
+		session.reloadCluster = info.st_ino;
+		session.reloadMagic = DLP_RELOAD_MAGIC;
+		session.checksum = dlpSessionChecksum(&session);
+		result = !fseek(page, DLP_SESSION_PAGE_OFFSET, SEEK_SET)
+			&& fwrite(&session, 1, sizeof(session), page) == sizeof(session);
+	} else {
+		remove(path);
+	}
+	const int pageClosed = fclose(page);
+	return result && !pageClosed;
+}
+
 int runNds(u32 cluster, u32 saveCluster, u32 donorTwlCluster, /* u32 gbaCluster, u32 gbaSavCluster, */ u32 quitCluster, u32 wideCheatCluster, u32 apPatchCluster, u32 apPatchPostCardReadCluster, u32 dsi2dsSavePatchCluster, u32 cheatCluster, u32 patchOffsetCacheCluster, u32 ramDumpCluster, u32 srParamsCluster, u32 screenshotCluster, u32 apFixOverlaysCluster, u32 musicCluster, u32 pageFileCluster, u32 manualCluster, u32 sharedFontCluster, configuration* conf) {
 	nocashMessage("runNds");
 
@@ -351,11 +421,16 @@ int runNds(u32 cluster, u32 saveCluster, u32 donorTwlCluster, /* u32 gbaCluster,
 	// Load the loader into the correct address
 	tonccpy(lc0, loader, 0x40000); //vramcpy(LCDC_BANK_D, loader, loaderSize);
 
-	if(conf->gameOnFlashcard || conf->saveOnFlashcard) {
+	if(conf->gameOnFlashcard || conf->saveOnFlashcard || conf->bootstrapOnFlashcard || conf->dlpVirtualSlot1NeedsDldi) {
 		// Patch the loader with a DLDI for the card
 		if (!dldiPatchLoader ((data_t*)lc0, 0x40000, conf->initDisc, altDldi)) {
 			return 3;
 		}
+	}
+
+	if ((!dsiFeatures() || conf->b4dsMode) && conf->dlpSessionActive) {
+		const char* pageFilePath = conf->b4dsMode || conf->bootstrapOnFlashcard ? "fat:/_nds/pagefile.sys" : "sd:/_nds/pagefile.sys";
+		if (!prepareDlpReload(lc0, pageFilePath)) return -18;
 	}
 
 	// Give the VRAM to the ARM7

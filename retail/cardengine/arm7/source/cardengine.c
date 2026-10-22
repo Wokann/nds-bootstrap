@@ -40,6 +40,8 @@
 #define reducedVolume BIT(6)
 #define a9IrqHooked BIT(7)
 #define delayWrites BIT(8)
+#define dlpSession BIT(27)
+#define dlpVirtualSlot1 BIT(28)
 
 #define RUMBLE_PAK			(*(vuint16 *)0x08000000)
 #define WARIOWARE_PAK		(*(vuint16 *)0x080000C4)
@@ -71,8 +73,8 @@ extern u8 RumblePakType;
 
 vu32* volatile sharedAddr = (vu32*)CARDENGINE_SHARED_ADDRESS_SDK1;
 
-static bool initialized = false;
-static bool bootloaderCleared = false;
+enum { CE7_INIT_COLD, CE7_INIT_RESET, CE7_INIT_READY };
+static u8 initializeState = CE7_INIT_COLD;
 #ifndef MUSIC
 static bool funcsUnpatched = false;
 #endif
@@ -146,26 +148,34 @@ static void waitForArm9(void) {
 }
 
 static void initialize(void) {
-	if (initialized) {
+	if (initializeState == CE7_INIT_READY) {
 		return;
 	}
 
 	isSdk5Set = isSdk5(moduleParams);
 
 	ndsHeader = (tNDSHeader*)(isSdk5Set ? NDS_HEADER_SDK5 : NDS_HEADER);
-	personalData = (PERSONAL_DATA*)(isSdk5Set ? (u8*)NDS_HEADER_SDK5-0x180 : (u8*)NDS_HEADER-0x180);
+	personalData = (PERSONAL_DATA*)((u8*)ndsHeader-0x180);
+
+	// The downloaded SDK clears HW_CARD_ROM_HEADER during ARM7 startup.
+	if (valueBits & dlpVirtualSlot1) {
+		// Inline CpuFastSet keeps this engine inside its 0x1080-byte region.
+		register const void* source __asm__("r0") = (const void*)NDS_HEADER_POKEMON;
+		register void* destination __asm__("r1") = (u8*)ndsHeader-0x380;
+		register u32 count __asm__("r2") = 0x160 / 4;
+		__asm__ volatile ("swi 0x0C" : "+r" (source), "+r" (destination), "+r" (count) : : "r3", "r12", "memory", "cc");
+	}
 
 	if (language >= 0 && language <= 7) {
 		// Change language
 		personalData->language = language;
 	}
 
-	if (!bootloaderCleared) {
+	if (initializeState == CE7_INIT_COLD) {
 		toncset((u8*)0x06000000, 0, 0x40000);	// Clear bootloader
-		bootloaderCleared = true;
 	}
 
-	initialized = true;
+	initializeState = CE7_INIT_READY;
 }
 
 extern void inGameMenu(void);
@@ -243,13 +253,17 @@ void reset(void) {
 	REG_IF = ~0;
 	*(vu32*)0x0380FFFC = 0;  // IRQ_HANDLER ARM7 version
 	*(vu32*)0x0380FFF8 = 0; // VBLANK_INTR_WAIT_FLAGS, ARM7 version
-	REG_POWERCNT = 1;  // Turn off power to stuff
+	// Multiboot keeps the previous radio session alive during the handoff.
+	if (!(valueBits & dlpSession)) REG_POWERCNT = 1;
 
-	initialized = false;
+	initializeState = CE7_INIT_RESET;
 #ifndef MUSIC
 	funcsUnpatched = false;
 #endif
 	languageTimer = 0;
+
+	// Acknowledge only after sound/capture and the old SDK are stopped.
+	sharedAddr[3] = 0;
 
 	while (sharedAddr[0] != 0x544F4F42) { // 'BOOT'
 		if (sharedAddr[1] == 0x48495344) {  // 'DSIH'
@@ -578,6 +592,26 @@ bool eepromProtect(void) {
 	return true;
 }
 
+static bool eepromSave(u32 src, u32 dst, u32 len, u32 command) {
+	if (!(valueBits & a9IrqHooked)) return false;
+#ifndef MUSIC
+	if (command == 'W' && (valueBits & delayWrites)) {
+		if (*(int*)((valueBits & isSdk5Set) ? 0x02FFFC3C : 0x027FFC3C) >= 60*2) {
+			valueBits &= ~delayWrites;
+		} else {
+			waitFrames(1);
+		}
+	}
+#endif
+
+	sharedAddr[0] = src;
+	sharedAddr[1] = dst;
+	sharedAddr[2] = len;
+	sharedAddr[3] = 0x53415600 | command;
+	waitForArm9();
+	return sharedAddr[0];
+}
+
 bool eepromRead(u32 src, void *dst, u32 len) {
 	#ifdef DEBUG
 	dbg_printf("\narm7 eepromRead\n");
@@ -590,22 +624,7 @@ bool eepromRead(u32 src, void *dst, u32 len) {
 	dbg_hexa(len);
 	#endif
 
-	if (!(valueBits & a9IrqHooked)) {
-		return false;
-	}
-
-	// Send a command to the ARM9 to read the save
-	const u32 commandSaveRead = 0x53415652;
-
-	// Write the command
-	sharedAddr[0] = src;
-	sharedAddr[1] = (vu32)dst;
-	sharedAddr[2] = len;
-	sharedAddr[3] = commandSaveRead;
-
-	waitForArm9();
-
-	return true;
+	return eepromSave(src, (u32)dst, len, 'R');
 }
 
 bool eepromPageWrite(u32 dst, const void *src, u32 len) {
@@ -620,32 +639,7 @@ bool eepromPageWrite(u32 dst, const void *src, u32 len) {
 	dbg_hexa(len);
 	#endif
 
-	if (!(valueBits & a9IrqHooked)) {
-		return false;
-	}
-
-#ifndef MUSIC
-	if (valueBits & delayWrites) {
-		if (*(int*)((valueBits & isSdk5Set) ? 0x02FFFC3C : 0x027FFC3C) >= 60*2) {
-			valueBits &= ~delayWrites;
-		} else {
-			waitFrames(1);
-		}
-	}
-#endif
-
-	// Send a command to the ARM9 to write the save
-	const u32 commandSaveWrite = 0x53415657;
-
-	// Write the command
-	sharedAddr[0] = (vu32)src;
-	sharedAddr[1] = dst;
-	sharedAddr[2] = len;
-	sharedAddr[3] = commandSaveWrite;
-
-	waitForArm9();
-
-	return true;
+	return eepromSave((u32)src, dst, len, 'W');
 }
 
 bool eepromPageProg(u32 dst, const void *src, u32 len) {
@@ -668,7 +662,7 @@ bool eepromPageVerify(u32 dst, const void *src, u32 len) {
 	dbg_hexa(len);
 	#endif
 
-	return eepromPageWrite(dst, src, len);
+	return eepromSave((u32)src, dst, len, (valueBits & dlpVirtualSlot1) ? 'V' : 'W');
 }
 
 bool eepromPageErase (u32 dst) {
@@ -676,12 +670,8 @@ bool eepromPageErase (u32 dst) {
 	dbg_printf("\narm7 eepromPageErase\n");
 	#endif
 
-	if (!(valueBits & a9IrqHooked)) {
-		return false;
-	}
-
-	// TODO: this should be implemented?
-	return true;
+	if (valueBits & dlpVirtualSlot1) return false;
+	return (valueBits & a9IrqHooked) != 0;
 }
 
 bool cardRead(u32 dma, u32 src, void *dst, u32 len) {

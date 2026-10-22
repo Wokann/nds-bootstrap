@@ -27,6 +27,7 @@
 #include "cheat_engine.h"
 #include "value_bits.h"
 #include "common.h"
+#include "dlp.h"
 #include "patch.h"
 #include "find.h"
 #include "hook.h"
@@ -36,6 +37,8 @@
 #define b_a9IrqHooked BIT(7)
 #define b_delayWrites BIT(8)
 #define b_sleepMode BIT(17)
+#define b_dlpSession BIT(27)
+#define b_dlpVirtualSlot1 BIT(28)
 
 extern u32 newArm7binarySize;
 
@@ -273,5 +276,8 @@ int hookNdsRetailArm7(
 	toncset((u8*)CHEAT_ENGINE_LOCATION_B4DS_BUFFERED, 0, 0x400);
 
 	nocashMessage("ERR_NONE");
+	if (dlpSessionActive) ce7->valueBits |= b_dlpSession;
+	if (dlpVirtualSlot1Active) ce7->valueBits |= b_dlpVirtualSlot1;
+	if (dlpVirtualSlot1Empty) ce7->valueBits &= ~b_a9IrqHooked;
 	return ERR_NONE;
 }

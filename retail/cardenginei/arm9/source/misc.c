@@ -29,6 +29,7 @@
 #include "nds_header.h"
 #include "cardengine.h"
 #include "locations.h"
+#include "dlp.h"
 #include "cardengine_header_arm9.h"
 
 #define extendedMemory BIT(1)
@@ -173,10 +174,21 @@ void initialize(void) {
 extern void resetMpu(void);
 
 void reset(u32 param, u32 tid2) {
+#ifndef TWLSDK
+	const bool stationHandoff = (tid2 == DLP_STATION_HANDOFF && (ce9->valueBits & BIT(23)));
+	const bool downloadedSrl = (tid2 == 0x4C525344 || stationHandoff);
+	#ifndef GSDD
+	if (stationHandoff) {
+		sharedAddr[2] = DLP_STATION_HANDOFF;
+		ce9->valueBits |= slowSoftReset; // Re-enter the full loader for each received image.
+	}
+	#endif
+#endif
 	sysSetCardOwner(false);	// Give Slot-1 access to arm7
 #ifndef TWLSDK
 	const u32 resetParams = ((ce9->valueBits & isSdk5) ? RESET_PARAM_SDK5 : RESET_PARAM);
 	*(u32*)resetParams = param;
+	const u32 resetCommand = downloadedSrl ? 0x4C525344 : 0x52534554;
 	#ifndef GSDD
 	if (ce9->valueBits & slowSoftReset) {
 		if (ce9->consoleModel < 2) {
@@ -187,12 +199,12 @@ void reset(u32 param, u32 tid2) {
 		}
 		enterCriticalSection();
 		cacheFlush();
-		sharedAddr[3] = 0x52534554;
+		sharedAddr[3] = resetCommand;
 		while (1);
 	} else
 	#endif
 	{
-		sharedAddr[3] = 0x52534554;
+		sharedAddr[3] = resetCommand;
 	}
 #else
 	const bool isDSiWare = (*(u32*)0x02FFE234 == 0x00030004 || *(u32*)0x02FFE234 == 0x00030005 || *(u32*)0x02FFE234 == 0x00030015 || *(u32*)0x02FFE234 == 0x00030017);
@@ -335,7 +347,7 @@ void reset(u32 param, u32 tid2) {
 	sysSetCardOwner(true);	// Give Slot-1 access back to arm9
 
 	#ifndef GSDD
-	if ((ce9->valueBits & isDlp) || *(u32*)(resetParams+0xC) > 0) {
+	if ((ce9->valueBits & (isDlp | BIT(23))) || *(u32*)(resetParams+0xC) > 0) {
 		sharedAddr[4] = 0;
 		initialized = false;
 	}

@@ -124,6 +124,7 @@ bool a7GetReloc(const tNDSHeader* ndsHeader, const module_params_t* moduleParams
 			(u32*)ndsHeader->arm7destination, ndsHeader->arm7binarySize,
 			relocateValidateSignature, 1
 		);
+		if (!relocationCheck) return false;
 		u32 relocationCheck2 =
 			*(u32*)(relocationCheck - 0x4);
 
@@ -151,7 +152,7 @@ bool a7GetReloc(const tNDSHeader* ndsHeader, const module_params_t* moduleParams
 	}
 
 	// Find the relocation signature
-    u32 relocationStart = (u32)findOffset(
+    relocationStart = (u32)findOffset(
 		(u32*)ndsHeader->arm7destination, ndsHeader->arm7binarySize,
 		relocateStartSignature, 1
 	);
@@ -164,6 +165,7 @@ bool a7GetReloc(const tNDSHeader* ndsHeader, const module_params_t* moduleParams
 	u32 forwardedRelocStartAddr = relocationStart + 4;
 	while (!*(u32*)forwardedRelocStartAddr || *(u32*)forwardedRelocStartAddr < 0x02000000 || *(u32*)forwardedRelocStartAddr > 0x03000000) {
 		forwardedRelocStartAddr += 4;
+		if (forwardedRelocStartAddr + 0x14 > (u32)ndsHeader->arm7destination + ndsHeader->arm7binarySize) return false;
 	}
 	vAddrOfRelocSrc = *(u32*)(forwardedRelocStartAddr + 8);
 
@@ -184,6 +186,7 @@ bool a7GetReloc(const tNDSHeader* ndsHeader, const module_params_t* moduleParams
 			(u32*)relocationStart, ndsHeader->arm7binarySize,
 			nextFunctiontSignature, 1
 		);
+		if (!nextFunction) return false;
 
 		// Validate the relocation signature
 		forwardedRelocStartAddr = nextFunction - 0x14;

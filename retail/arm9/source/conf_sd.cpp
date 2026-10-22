@@ -360,6 +360,11 @@ static void load_conf(configuration* conf, const char* fn) {
 
 	// SAV/PUB path
 	conf->savPath = strdup(config_file.fetch("NDS-BOOTSTRAP", "SAV_PATH").c_str());
+	conf->dlpSlot1Mode = strtol(config_file.fetch("NDS-BOOTSTRAP", "DLP_SLOT1_MODE", "-1").c_str(), NULL, 0);
+	conf->dlpVirtualSlot1RomPath = strdup(config_file.fetch("NDS-BOOTSTRAP", "DLP_VIRTUAL_SLOT1_ROM_PATH").c_str());
+	conf->dlpVirtualSlot1SavPath = strdup(config_file.fetch("NDS-BOOTSTRAP", "DLP_VIRTUAL_SLOT1_SAV_PATH").c_str());
+	conf->dlpVirtualSlot1NeedsDldi = false;
+	conf->dlpSessionActive = false;
 
 	// PRV path
 	conf->prvPath = strdup(config_file.fetch("NDS-BOOTSTRAP", "PRV_PATH").c_str());
@@ -736,7 +741,7 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 	}
 	nocashMessage("fatInitDefault");
 
-	if ((strncmp (bootstrapPath, "sd:/", 4) != 0) && (strncmp (bootstrapPath, "fat:/", 5) != 0)) {
+	if (!bootstrapPath || ((strncmp (bootstrapPath, "sd:/", 4) != 0) && (strncmp (bootstrapPath, "fat:/", 5) != 0))) {
 		//bootstrapPath = "sd:/_nds/nds-bootstrap-release.nds";
 		bootstrapPath = conf->sdFound ? "sd:/_nds/nds-bootstrap-nightly.nds" : "fat:/_nds/nds-bootstrap-nightly.nds";
 	}
@@ -847,13 +852,27 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 
 	conf->gameOnFlashcard = (conf->ndsPath[0] == 'f' && conf->ndsPath[1] == 'a' && conf->ndsPath[2] == 't');
 	conf->saveOnFlashcard = (conf->savPath[0] == 'f' && conf->savPath[1] == 'a' && conf->savPath[2] == 't');
+	if (conf->dlpSlot1Mode == 0 || conf->dlpSlot1Mode == 1) {
+		char tid[4] = {};
+		FILE* receiver = fopen(conf->ndsPath, "rb");
+		if (receiver) {
+			fseek(receiver, 0xC, SEEK_SET);
+			if (fread(tid, 1, sizeof(tid), receiver) == sizeof(tid)
+			 && !memcmp(tid, "HND", 3)) {
+				conf->dlpSessionActive = true;
+				conf->dlpVirtualSlot1NeedsDldi = conf->dlpSlot1Mode == 1 && conf->dlpVirtualSlot1RomPath[0]
+					&& (!strncmp(conf->dlpVirtualSlot1RomPath, "fat:/", 5) || !strncmp(conf->dlpVirtualSlot1SavPath, "fat:/", 5));
+			}
+			fclose(receiver);
+		}
+	}
 
 	if (conf->quitPath[0] == 'f' && conf->quitPath[1] == 'a' && conf->quitPath[2] == 't') {
 		conf->valueBits2 |= BIT(6);
 	}
 
 	if (conf->b4dsMode) {
-		if (!dsiFeatures() || !conf->gameOnFlashcard || !conf->saveOnFlashcard) {
+		if (!dsiFeatures() || !conf->gameOnFlashcard || (!conf->saveOnFlashcard && !conf->dlpSessionActive)) {
 			conf->b4dsMode = 0;
 		} else {
 			conf->initDisc = true;
@@ -1396,7 +1415,7 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 		fclose(ndsFile);
 		fclose(donorNdsFile);
 
-		if (!conf->bootstrapOnFlashcard && !conf->gameOnFlashcard && !conf->saveOnFlashcard) {
+		if (!conf->bootstrapOnFlashcard && !conf->gameOnFlashcard && !conf->saveOnFlashcard && !conf->dlpVirtualSlot1NeedsDldi) {
 			if (romTid[0] != 'I' && memcmp(romTid, "UZP", 3) != 0 && memcmp(romTid, "HND", 3) != 0 && memcmp(romTid, "UEI", 3) != 0) {
 				disableSlot1();
 			} else {
@@ -2373,8 +2392,12 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 		const bool gsdd = (memcmp(romTid, "BO5", 3) == 0);
 		const bool foto = (strncmp(romTid, "DMF", 3) == 0 || strncmp(romTid, "DSY", 3) == 0 || strncmp(romTid, "KSY", 3) == 0);
 
-		// Load ce9 binary
-		if (b4dsDebugRam) {
+		// Load ce9 binary. DLP handoffs require a full engine across SDK changes.
+		if (conf->dlpSessionActive) {
+			loadCardEngineBinary(io_dldi_data->driverSize >= 0x0E
+				? "nitro:/cardengine_arm9_32.lz77" : "nitro:/cardengine_arm9.lz77",
+				(u8*)CARDENGINE_ARM9_LOCATION_BUFFERED);
+		} else if (b4dsDebugRam) {
 			if (!startMultibootSrl && ((accessControl & BIT(4)) || (a7mbk6 == 0x080037C0 && ndsArm9Offset >= 0x02004000))) {
 				if (foto) {
 					loadCardEngineBinary("nitro:/cardengine_arm9_extmem_foto.lz77", (u8*)CARDENGINE_ARM9_LOCATION_BUFFERED);

@@ -19,6 +19,7 @@
 #include "nds_loader_arm9.h"
 #include "conf_sd.h"
 #include "version.h"
+#include "dlp.h"
 
 #define REG_SCFG_EXT7 *(u32*)0x02FFFDF0
 
@@ -232,6 +233,67 @@ static inline void debugConf(configuration* conf) {
 	dbg_printf("saveOnFlashcard: %s\n", btoa(conf->saveOnFlashcard));
 	dbg_printf("macroMode: %s\n", btoa(conf->macroMode));
 	dbg_printf("saveRelocation: %s\n", btoa(conf->saveRelocation));
+}
+
+static int writeDlpSession(const configuration* conf) {
+	DlpSession session = {};
+	// Scope persistent Slot-1 settings to Download Play receiver launches.
+	char tid[4] = {};
+	FILE* file = fopen(conf->ndsPath, "rb");
+	if (!file) return -10;
+	const bool headerRead = !fseek(file, 0xC, SEEK_SET)
+		&& fread(tid, 1, sizeof(tid), file) == sizeof(tid);
+	const bool receiver = headerRead && !memcmp(tid, "HND", 3);
+	fclose(file);
+	if (!headerRead) return -10;
+	if (receiver && conf->dlpSlot1Mode >= 0) {
+		if (conf->dlpSlot1Mode > DLP_SLOT1_VIRTUAL) return -11;
+		session.magic = DLP_SESSION_MAGIC;
+		session.version = DLP_SESSION_VERSION;
+		session.mode = conf->dlpSlot1Mode;
+		if (session.mode == DLP_SLOT1_VIRTUAL && !conf->dlpVirtualSlot1RomPath[0]) {
+			session.flags = DLP_VIRTUAL_SLOT1_EMPTY;
+		} else if (session.mode == DLP_SLOT1_VIRTUAL) {
+			const char* rom = conf->dlpVirtualSlot1RomPath;
+			const char* sav = conf->dlpVirtualSlot1SavPath;
+			if ((strncmp(rom, "fat:/", 5) && strncmp(rom, "sd:/", 4))
+			 || (strncmp(sav, "fat:/", 5) && strncmp(sav, "sd:/", 4))) return -12;
+			const bool romOnFlashcard = !strncmp(rom, "fat:/", 5);
+			const bool saveOnFlashcard = !strncmp(sav, "fat:/", 5);
+			if (romOnFlashcard) session.flags |= DLP_VIRTUAL_SLOT1_ROM_FAT;
+			if (saveOnFlashcard) session.flags |= DLP_VIRTUAL_SLOT1_SAVE_FAT;
+			if ((!dsiFeatures() || conf->b4dsMode)
+			 && session.flags != (DLP_VIRTUAL_SLOT1_ROM_FAT | DLP_VIRTUAL_SLOT1_SAVE_FAT)) return -13;
+			const bool receiverOnFlashcard = !strncmp(conf->ndsPath, "fat:/", 5);
+			const bool pageOnFlashcard = pageFilePath.compare(0, 5, "fat:/") == 0;
+			struct stat romStat, savStat, receiverStat, pageStat;
+			if (stat(rom, &romStat) || stat(sav, &savStat) || stat(conf->ndsPath, &receiverStat)
+			 || stat(pageFilePath.c_str(), &pageStat)
+			 || !S_ISREG(romStat.st_mode) || !S_ISREG(savStat.st_mode)
+			 || romStat.st_size < 0x4000 || savStat.st_size < 0x200
+			 || (romStat.st_ino == receiverStat.st_ino && romOnFlashcard == receiverOnFlashcard)
+			 || (savStat.st_ino == receiverStat.st_ino && saveOnFlashcard == receiverOnFlashcard)
+			 || (romStat.st_ino == pageStat.st_ino && romOnFlashcard == pageOnFlashcard)
+			 || (savStat.st_ino == pageStat.st_ino && saveOnFlashcard == pageOnFlashcard)
+			 || (romStat.st_ino == savStat.st_ino && romOnFlashcard == saveOnFlashcard)) return -14;
+			// Use an existing save without changing its size.
+			file = fopen(sav, "rb+");
+			if (!file) return -15;
+			fclose(file);
+			session.romCluster = romStat.st_ino;
+			session.saveCluster = savStat.st_ino;
+			session.romSize = romStat.st_size;
+			session.saveSize = savStat.st_size;
+		}
+		session.checksum = dlpSessionChecksum(&session);
+		if (!dlpSessionValid(&session)) return -16;
+	}
+	file = fopen(pageFilePath.c_str(), "rb+");
+	if (!file) return (receiver && conf->dlpSlot1Mode >= 0) ? -17 : 0;
+	const bool written = !fseek(file, DLP_SESSION_PAGE_OFFSET, SEEK_SET)
+		&& fwrite(&session, 1, sizeof(session), file) == sizeof(session);
+	const int closeStatus = fclose(file);
+	return (written && !closeStatus) ? 0 : -18;
 }
 
 static int runNdsFile(configuration* conf) {
@@ -574,6 +636,8 @@ static int runNdsFile(configuration* conf) {
 	if (stat(pageFilePath.c_str(), &stPage) >= 0) {
 		clusterPageFile = stPage.st_ino;
 	}
+	const int dlpStatus = writeDlpSession(conf);
+	if (dlpStatus) return dlpStatus;
 
 	if (stat(sharedFontPath.c_str(), &stTwlFont) >= 0) {
 		clusterTwlFont = stTwlFont.st_ino;
@@ -587,7 +651,7 @@ int main(int argc, char** argv) {
 
 	configuration* conf = (configuration*)malloc(sizeof(configuration));
 
-	int status = loadFromSD(conf, argv[0]);
+	int status = loadFromSD(conf, (argc > 0 && argv) ? argv[0] : NULL);
 	sdFound = (conf->sdFound && !conf->b4dsMode);
 	bootstrapOnFlashcard = conf->bootstrapOnFlashcard;
 

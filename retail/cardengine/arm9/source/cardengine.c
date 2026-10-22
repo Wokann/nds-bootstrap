@@ -38,6 +38,7 @@
 #include "locations.h"
 #include "cardengine_header_arm9.h"
 #include "unpatched_funcs.h"
+#include "dlp.h"
 
 #include "io_m3_common.h"
 #include "io_g6_common.h"
@@ -205,10 +206,24 @@ extern void sdk5MpuFix();
 extern void resetMpu();
 extern u32 getDtcmBase(void);
 
+// Share validation to fit the resident engine's fixed memory region.
+static void __attribute__((noinline)) checkDlpTransfer(u32 transferred, u32 length) {
+	if (DLP_STAGING_ARM9 && (ce9->valueBits & BIT(23)) && transferred != length) while (1);
+}
+
+static void readDlpFile(char* buffer, aFile* file, u32 offset, u32 length) {
+	checkDlpTransfer(fileRead(buffer, file, offset, length), length);
+}
+
+static void writeDlpFile(const char* buffer, aFile* file, u32 offset, u32 length) {
+	checkDlpTransfer(fileWrite(buffer, file, offset, length), length);
+}
+
 void reset(u32 param, u32 param2) {
 	setDeviceOwner();
+	const u32 valueBits = ce9->valueBits;
 	#ifndef GSDD
-	const u32 resetParams = ((ce9->valueBits & isSdk5) ? RESET_PARAM_SDK5 : RESET_PARAM);
+	const u32 resetParams = ((valueBits & isSdk5) ? RESET_PARAM_SDK5 : RESET_PARAM);
 	#else
 	const u32 resetParams = RESET_PARAM_SDK5;
 	#endif
@@ -219,7 +234,30 @@ void reset(u32 param, u32 param2) {
 	#ifndef GSDD
 	const bool rebootConsole = (isDSiWare || iUncompressedSize > 0x280000);
 	#endif
-	const bool downloadedSrl = (param2 == 0x4C525344); // 'DSRL'
+	#if DLP_STAGING_ARM9
+	const bool downloadedSrl = (param2 == 0x4C525344 || param2 == DLP_STATION_HANDOFF);
+	#else
+	const bool downloadedSrl = (param2 == 0x4C525344);
+	#endif
+	bool preparedDlp = false;
+	bool ramDlp = false;
+	#if DLP_STAGING_ARM9
+	if (downloadedSrl && (valueBits & BIT(23))) {
+		// B4DS storage runs on ARM9. Stop the old ARM7 audio before
+		// staging can overwrite buffers that its mixer still references.
+		enterCriticalSection();
+		sharedAddr[0] = 0;
+		sharedAddr[1] = 0;
+		sharedAddr[3] = 0x4E445352; // RSDN
+		while (sharedAddr[3] != 0);
+		u32 cache[2] = {0};
+		fileRead((char*)cache, &pageFile, DLP_RELOAD_SESSION_OFFSET, sizeof(cache));
+		if (cache[0] >= 2 && cache[0] < 0x0FFFFFF0 && cache[1] == DLP_RELOAD_MAGIC) {
+			getFileFromCluster(&bootNds, cache[0]);
+			preparedDlp = true;
+		}
+	}
+	#endif
 	const bool loadNitroSrl = (*(u32*)(resetParams+0xC) > 0);
 	#ifndef GSDD
 	if (rebootConsole /*|| param == 0xFFFFFFFF*/ || downloadedSrl || loadNitroSrl) {
@@ -228,14 +266,29 @@ void reset(u32 param, u32 param2) {
 			sharedAddr[1] = 0x57495344; // 'DSIW'
 		}
 		if (param != 0xFFFFFFFF && !igmReset && downloadedSrl) {
+			DlpStageImage image = {(u32)ndsHeader->arm9destination, 0x022C0000};
+			#if DLP_STAGING_ARM9
+			if (param2 == DLP_STATION_HANDOFF && (valueBits & BIT(23))) {
+				if (dlpStageStation((u32*)ndsHeader, (u32*)0x023FE840,
+				                    (u8*)0x023FE800, (u8*)0x027FFC42, &image) < 0) while (1);
+			}
+			#endif
 			*(u32*)resetParams = 0;
 			*(u32*)(resetParams+8) = 0x44414F4C; // 'LOAD'
-			fileWrite((char*)ndsHeader, &pageFile, 0x2BFE00, 0x160);
-			fileWrite((char*)ndsHeader->arm9destination, &pageFile, 0x14000, ndsHeader->arm9binarySize);
-			fileWrite((char*)ndsHeader->arm7destination, &pageFile, 0x2C0000, ndsHeader->arm7binarySize);
+			writeDlpFile((char*)ndsHeader, &pageFile, 0x2BFE00, 0x160);
+			#if DLP_STAGING_ARM9
+			DlpRamBoot ram = {DLP_RAM_MAGIC, image.arm9Source, image.arm7Source};
+			ramDlp = preparedDlp && dlpRamBootValid((u32*)ndsHeader, &ram);
+			if (!ramDlp) ram.magic = 0;
+			writeDlpFile((char*)&ram, &pageFile, DLP_RAM_PAGE_OFFSET, sizeof(ram));
+			#endif
+			if (!ramDlp) {
+				writeDlpFile((char*)image.arm9Source, &pageFile, 0x14000, ndsHeader->arm9binarySize);
+				writeDlpFile((char*)image.arm7Source, &pageFile, 0x2C0000, ndsHeader->arm7binarySize);
+			}
 		}
-		fileWrite((char*)resetParams, &srParamsFile, 0, 0x10);
-		fileWrite((char*)resetParams+0x20, &srParamsFile, 0x10, 0x40);
+		writeDlpFile((char*)resetParams, &srParamsFile, 0, 0x10);
+		writeDlpFile((char*)resetParams+0x20, &srParamsFile, 0x10, 0x40);
 		if (sharedAddr[1] == 0x57495344 || param == 0xFFFFFFFF) {
 		//	sharedAddr[3] = 0x52534554;
 		 	sharedAddr[3] = 0x4E445352; // 'RSDN'
@@ -243,8 +296,8 @@ void reset(u32 param, u32 param2) {
 		}
 	}
 	#endif
-	// sharedAddr[3] = 0x52534554;
-	sharedAddr[3] = 0x4E445352; // 'RSDN'
+	// In a DLP handoff ARM7 is already stopped and waiting for BOOT.
+	sharedAddr[3] = 0x4E445352; // RSDN
 
 	//EXCEPTION_VECTOR_SDK1 = 0;
 
@@ -289,8 +342,8 @@ void reset(u32 param, u32 param2) {
 	IPC_SYNC_hooked = false;
 	#endif
 
-	toncset((char*)((ce9->valueBits & isSdk5) ? 0x02FFFD80 : 0x027FFD80), 0, 0x80);
-	toncset((char*)((ce9->valueBits & isSdk5) ? 0x02FFFF80 : 0x027FFF80), 0, 0x80);
+	toncset((char*)((valueBits & isSdk5) ? 0x02FFFD80 : 0x027FFD80), 0, 0x80);
+	toncset((char*)((valueBits & isSdk5) ? 0x02FFFF80 : 0x027FFF80), 0, 0x80);
 
 	if (param == 0xFFFFFFFF || downloadedSrl || loadNitroSrl) {
 		resetMpu();
@@ -331,11 +384,13 @@ void reset(u32 param, u32 param2) {
 		// 	*(u32*)(0x02000000) |= BIT(2);
 		// }
 		//toncset((u32*)0x02000004, 0, 0x3DA000 - 4);
-		#ifdef NODSIWARE
-		toncset((u32*)0x02000000, 0, 0x3C0000);
-		#else
-		toncset((u32*)0x02004000, 0, 0x3BC000);
-		#endif
+		if (!ramDlp) {
+			#ifdef NODSIWARE
+			toncset((u32*)0x02000000, 0, 0x3C0000);
+			#else
+			toncset((u32*)0x02004000, 0, 0x3BC000);
+			#endif
+		}
 		/* #ifdef NODSIWARE
 		toncset((u32*)0x023C4000, 0, 0x1C000);
 		toncset((u32*)0x02FE4000, 0, 0x19C00-0x4000);
@@ -343,28 +398,44 @@ void reset(u32 param, u32 param2) {
 		toncset((u32*)0x023C4000, 0, 0x16800);
 		toncset((u32*)0x02FE4000, 0, 0x1D000-0x4000);
 		#endif */
-		if (param == 0xFFFFFFFF) {
-			*(u32*)(0x02000000) = BIT(0) | BIT(1) | BIT(2);
+		if (!ramDlp) {
+			if (param == 0xFFFFFFFF) {
+				*(u32*)(0x02000000) = BIT(0) | BIT(1) | BIT(2);
+			}
+			#ifndef NODSIWARE
+			else {
+				*(u32*)(0x02000000) = 0;
+			}
+			#endif
 		}
-		#ifndef NODSIWARE
-		else {
-			*(u32*)(0x02000000) = 0;
-		}
-		#endif
-		*(u32*)0x02000004 = 0x54455352; // 'RSET'
+		if (!ramDlp) *(u32*)0x02000004 = 0x54455352; // 'RSET'
 
 		WRAM_CR = 0; // Set shared ram to ARM9
 
-		fileRead((char*)ndsHeader, &bootNds, 0, 0x170);
-		fileRead((char*)ndsHeader->arm9destination, &bootNds, ndsHeader->arm9romOffset, ndsHeader->arm9binarySize);
-		fileRead((char*)ndsHeader->arm7destination, &bootNds, ndsHeader->arm7romOffset, ndsHeader->arm7binarySize);
+		// A received SRL must re-enter the full loader to apply its own SDK
+		// patches. QUIT_PATH remains the target for ordinary menu exits.
+		aFile* restartFile = downloadedSrl ? &ndsBootstrap : &bootNds;
+		if (preparedDlp) {
+			restartFile = &bootNds;
+			VRAM_C_CR = 0x80;
+			VRAM_D_CR = 0x80;
+		}
+		readDlpFile((char*)ndsHeader, restartFile, 0, 0x170);
+		readDlpFile((char*)ndsHeader->arm9destination, restartFile, ndsHeader->arm9romOffset, ndsHeader->arm9binarySize);
+		readDlpFile((char*)ndsHeader->arm7destination, restartFile, ndsHeader->arm7romOffset, ndsHeader->arm7binarySize);
 
 		WRAM_CR = 0x03; // Set shared ram to ARM7
 		sharedAddr[1] = 0x48495344; // 'DSIH'
 
-		fileRead((char*)0x02370000, &ndsBootstrap, ce9->dldiPatchBinaryOffset, 0x400);
-		if (!dldiPatchBinary(dldiOffsetNew, ndsHeader->arm9destination, ndsHeader->arm9binarySize)) {
-			sharedAddr[1] = 0x57495344;
+		if (preparedDlp) {
+			*(u32*)DLP_RAM_HEADER_FLAG = ramDlp ? DLP_RAM_MAGIC : 0;
+			VRAM_C_CR = VRAM_ENABLE | VRAM_C_ARM7_0x06000000;
+			VRAM_D_CR = VRAM_ENABLE | VRAM_D_ARM7_0x06020000;
+		} else {
+			readDlpFile((char*)0x02370000, &ndsBootstrap, ce9->dldiPatchBinaryOffset, 0x400);
+			if (!dldiPatchBinary(dldiOffsetNew, ndsHeader->arm9destination, ndsHeader->arm9binarySize)) {
+				sharedAddr[1] = 0x57495344;
+			}
 		}
 
 		toncset((u32*)0x02FFD000, 0, 0x2000);
@@ -373,7 +444,7 @@ void reset(u32 param, u32 param2) {
 		fileRead((char*)&newArm7binarySize, &pageFile, 0x3FFFF4, sizeof(u32));
 		#ifdef NODSIWARE
 		#ifndef GSDD
-		if (ce9->valueBits & clearRamOnReset) {
+		if (valueBits & clearRamOnReset) {
 			toncset((u32*)0x02000000, 0, 0x3C0000);
 		}
 		#endif
@@ -582,37 +653,46 @@ void inGameMenu(s32* exRegisters) {
 }
 
 #ifndef GSDD
-void cardSave(u32 src, u32 dst, u32 len, const bool write) {
+// operation: 0 reads, 1 writes, 2 verifies without changing the save.
+bool cardSave(u32 src, u32 dst, u32 len, const u32 operation) {
+	#if DLP_STAGING_ARM9
+	if (!ce9->saveSize || ((ce9->valueBits & BIT(23)) && len > ce9->saveSize)) {
+		if (!operation && !ce9->saveSize) toncset((void*)dst, 0xFF, len);
+		return false;
+	}
+	#endif
+	if (!len) return true;
 	const u16 exmemcnt = REG_EXMEMCNT;
-	// Read/Write save
 	setDeviceOwner();
-
-	if ((src % ce9->saveSize)+len > ce9->saveSize) {
-		u32 len2 = len;
-		u32 len3 = 0;
-		while ((src % ce9->saveSize)+len2 > ce9->saveSize) {
-			len2--;
-			len3++;
-		}
-		if (write) {
-			fileWrite((char*)src, &savFile, (dst % ce9->saveSize), len2);
-			fileWrite((char*)src+len2, &savFile, ((dst+len2) % ce9->saveSize), len3);
+	u32 offset = (operation ? dst : src) % ce9->saveSize;
+	char* buffer = (char*)(operation ? src : dst);
+	u32 verifyBuffer[8];
+	bool result = true;
+	while (len && result) {
+		u32 count = ce9->saveSize - offset;
+		if (count > len) count = len;
+		if (operation == 2) {
+			if (count > sizeof(verifyBuffer)) count = sizeof(verifyBuffer);
+			result = fileRead((char*)verifyBuffer, &savFile, offset, count) == count;
+			for (u32 i = 0; result && i < count; i++) result = ((char*)verifyBuffer)[i] == buffer[i];
+		} else if (operation == 1) {
+			result = fileWrite(buffer, &savFile, offset, count) == count;
 		} else {
-			fileRead((char*)dst, &savFile, (src % ce9->saveSize), len2);
-			fileRead((char*)dst+len2, &savFile, ((src+len2) % ce9->saveSize), len3);
+			result = fileRead(buffer, &savFile, offset, count) == count;
 		}
-	} else if (write) {
-		fileWrite((char*)src, &savFile, (dst % ce9->saveSize), len);
-	} else {
-		fileRead((char*)dst, &savFile, (src % ce9->saveSize), len);
+		offset += count;
+		if (offset == ce9->saveSize) offset = 0;
+		buffer += count;
+		len -= count;
 	}
 
 	REG_EXMEMCNT = exmemcnt;
+	return result;
 }
 
 bool cardSaveA(u32 src, u32 dst, u32 len) {
-	cardSave(src, dst, len, (src >= 0x01FF8000 && src < 0x03000000));
-	return true;
+	const bool result = cardSave(src, dst, len, (src >= 0x01FF8000 && src < 0x03000000));
+	return !(ce9->valueBits & BIT(23)) || result;
 }
 #endif
 
@@ -627,8 +707,10 @@ void myIrqHandlerIPC(void) {
 		case 0x4:
 		switch (sharedAddr[3]) {
 			case 0x53415652:
-			case 0x53415657: {
-				cardSave(*(vu32*)(sharedAddr), *(vu32*)(sharedAddr+1), *(vu32*)(sharedAddr+2), (sharedAddr[3] == 0x53415657));
+			case 0x53415657:
+			case 0x53415656: {
+				const u32 operation = sharedAddr[3] == 0x53415656 ? 2 : (sharedAddr[3] == 0x53415657);
+				sharedAddr[0] = cardSave(sharedAddr[0], sharedAddr[1], sharedAddr[2], operation);
 				sharedAddr[3] = 0;
 			} break;
 			/* case 0x524F4D52: {
@@ -749,6 +831,9 @@ static void initialize(void) {
 }
 
 void cardReadNormal(u8* dst, u32 src, u32 len) {
+	#if DLP_STAGING_ARM9
+	if (ce9->valueBits & BIT(24)) { toncset(dst, 0xFF, len); return; }
+	#endif
 	/*nocashMessage("begin\n");
 
 	dbg_hexa(dst);
@@ -854,7 +939,7 @@ bool cardSave(void) {
 	volatile void (*finish)(void*) = (volatile void*)(cardStruct[-3]);
 	void *const arg = (void*)(cardStruct[-2]);
 
-	if (len == 0) {
+	if (len == 0 || (DLP_STAGING_ARM9 && !ce9->saveSize)) {
 		if (finish) {
 			(*finish)(arg);
 		}

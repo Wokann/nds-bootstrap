@@ -5,6 +5,7 @@
 #include "patch.h"
 #include "find.h"
 #include "common.h"
+#include "dlp.h"
 #include "value_bits.h"
 #include "locations.h"
 #include "tonccpy.h"
@@ -830,9 +831,9 @@ u32 patchCardNdsArm7(
 
 	const char* romTid = getRomTid(ndsHeader);
 
-	if ((strncmp(romTid, "UOR", 3) == 0 && !saveOnFlashcard)
+	if (!dlpPhysicalSlot1Active && ((strncmp(romTid, "UOR", 3) == 0 && !saveOnFlashcard)
 	|| (strncmp(romTid, "UXB", 3) == 0 && !saveOnFlashcard)
-	|| (!ROMinRAM && !gameOnFlashcard)) {
+	|| (!ROMinRAM && !gameOnFlashcard))) {
 		patchCardCheckPullOut(ce7, ndsHeader, moduleParams);
 	}
 
@@ -840,11 +841,19 @@ u32 patchCardNdsArm7(
 		patchSrlStart(ce7, ndsHeader);
 	}
 
+	if (dlpPhysicalSlot1Active || dlpIsInitialReceiver(ndsHeader->gameCode)) {
+		patchSleepInputWrite(ce7, ndsHeader, moduleParams, false);
+		fixForDifferentBios(ce7, ndsHeader, moduleParams);
+		return ERR_NONE;
+	}
+
+	const bool stationForwarder = dlpSessionActive && patchOffsetCache.srlStartOffset9
+		&& patchOffsetCache.srlStartOffset9[2] == DLP_STATION_HANDOFF;
+	u32 saveResult = 0;
 	if (a7GetReloc(ndsHeader, moduleParams)) {
 		patchSleepInputWrite(ce7, ndsHeader, moduleParams, buttonsRemapped);
 		patchMirrorCheck(ndsHeader, moduleParams);
 		patchVramWifiBinaryLoad(ce7, ndsHeader, moduleParams);
-		u32 saveResult = 0;
 		// Save Relocation Switch
 		// Only when saveRelocation is turning off(FLASE) and GameCodeMatch is matching(TRUE),
 		// will the save file be located into DS Cartridge as original. 
@@ -872,7 +881,7 @@ u32 patchCardNdsArm7(
 			dbg_hexa(saveRelocation);
 			dbg_printf("\n");
 		}
-		if (saveRelocation || !GameCodeMatch) {
+		if ((!dlpSessionActive || dlpVirtualSlot1Active) && !stationForwarder && (saveRelocation || !GameCodeMatch)) {
 			if (newArm7binarySize==0x2352C || newArm7binarySize==0x235DC || newArm7binarySize==0x23CAC || newArm7binarySize==0x245C0 || newArm7binarySize==0x245C4) {
 				saveResult = savePatchInvertedThumb(ce7, ndsHeader, moduleParams, saveFileCluster, saveSize);    
 			} else if (isSdk5(moduleParams)) {
@@ -907,6 +916,8 @@ u32 patchCardNdsArm7(
 	} else {
 		patchSleepInputWrite(ce7, ndsHeader, moduleParams, false);
 	}
+
+	if (dlpVirtualSlot1Active && !stationForwarder && !saveResult) return ERR_LOAD_OTHR;
 
 	patchSwiHalt(ce7, ndsHeader, moduleParams);
 

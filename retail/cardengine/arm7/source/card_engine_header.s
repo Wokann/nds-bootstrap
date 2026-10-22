@@ -81,7 +81,7 @@ screenSwapHotkey:
 	.hword	0
 RumblePakType:
 	.byte	0
-.align	4
+.align	2
 
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
@@ -403,7 +403,7 @@ _blx_r3_stubthumb7:
 cardIdThumbStub:
 	ldr r0, cardIdDataT
 	bx      lr
-.align	4
+.align	2
 cardIdDataT:
 .word  0xC2FF01C0
 

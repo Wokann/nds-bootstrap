@@ -70,6 +70,7 @@
 #include "cheat_patch.h"
 #include "hook.h"
 #include "common.h"
+#include "dlp.h"
 #include "locations.h"
 #include "value_bits.h"
 #include "loading_screen.h"
@@ -95,6 +96,7 @@ extern u32 romSize;
 extern u32 initDisc;
 extern u32 saveFileCluster;
 extern u32 saveSize;
+extern u8 saveRelocation;
 extern u32 dataToPreloadAddr;
 extern u32 dataToPreloadSize;
 extern u32 apPatchFileCluster;
@@ -142,6 +144,11 @@ static aFile savFile;
 static aFile srParamsFile;
 static u32 softResetParams[0x50/4] = {0};
 bool srlFromPageFile = false;
+static bool dlpRamPending = false;
+bool dlpSessionActive = false;
+bool dlpPhysicalSlot1Active = false;
+bool dlpVirtualSlot1Active = false;
+bool dlpVirtualSlot1Empty = false;
 u32 srlAddr = 0;
 tNDSHeader* ndsHeader = NULL;
 u8 baseUnitCode = 0;
@@ -246,7 +253,7 @@ Written by Darkain.
 Modified by Chishm:
  * Added STMIA clear mem loop
 --------------------------------------------------------------------------*/
-static void resetMemory_ARM7(void) {
+static void resetMemory_ARM7(bool dlpReload) {
 	register int i;
 
 	REG_IME = 0;
@@ -294,7 +301,7 @@ static void resetMemory_ARM7(void) {
 	REG_IF = ~0;
 	*(vu32*)0x0380FFFC = 0;  // IRQ_HANDLER ARM7 version
 	*(vu32*)0x0380FFF8 = 0; // VBLANK_INTR_WAIT_FLAGS, ARM7 version
-	REG_POWERCNT = 1;  // Turn off power to stuff
+	if (!dlpReload) REG_POWERCNT = 1;
 }
 
 static void NDSTouchscreenMode(void) {
@@ -539,9 +546,20 @@ static void loadBinary_ARM7(const tDSiHeader* dsiHeaderTemp, aFile* file) {
 		aFile pageFile;
 		getFileFromCluster(&pageFile, pageFileCluster);
 
-		fileRead((char*)dsiHeaderTemp, &pageFile, 0x2BFE00, 0x160);
-		fileRead(dsiHeaderTemp->ndshdr.arm9destination, &pageFile, 0x14000, dsiHeaderTemp->ndshdr.arm9binarySize);
-		fileRead(dsiHeaderTemp->ndshdr.arm7destination, &pageFile, 0x2C0000, dsiHeaderTemp->ndshdr.arm7binarySize);
+		if (fileRead((char*)dsiHeaderTemp, &pageFile, 0x2BFE00, 0x160) != 0x160 && dlpSessionActive) errorOutput();
+		DlpRamBoot ram = {0};
+		if (dlpRamPending && fileRead((char*)&ram, &pageFile, DLP_RAM_PAGE_OFFSET, sizeof(ram)) != sizeof(ram)) errorOutput();
+		if (dlpRamPending && dlpSessionActive && dlpRamBootValid((u32*)&dsiHeaderTemp->ndshdr, &ram)) {
+			// The ARM9 destination may overlap the old ARM7 source.
+			tonccpy(dsiHeaderTemp->ndshdr.arm7destination, (void*)ram.arm7Source, dsiHeaderTemp->ndshdr.arm7binarySize);
+			tonccpy(dsiHeaderTemp->ndshdr.arm9destination, (void*)ram.arm9Source, dsiHeaderTemp->ndshdr.arm9binarySize);
+		} else {
+			if (dlpRamPending) errorOutput();
+			if (fileRead(dsiHeaderTemp->ndshdr.arm9destination, &pageFile, 0x14000, dsiHeaderTemp->ndshdr.arm9binarySize)
+				!= dsiHeaderTemp->ndshdr.arm9binarySize && dlpSessionActive) errorOutput();
+			if (fileRead(dsiHeaderTemp->ndshdr.arm7destination, &pageFile, 0x2C0000, dsiHeaderTemp->ndshdr.arm7binarySize)
+				!= dsiHeaderTemp->ndshdr.arm7binarySize && dlpSessionActive) errorOutput();
+		}
 	} else {
 		srlAddr = softResetParams[3];
 		fileRead((char*)dsiHeaderTemp, file, srlAddr, sizeof(*dsiHeaderTemp));
@@ -569,7 +587,7 @@ static void loadBinary_ARM7(const tDSiHeader* dsiHeaderTemp, aFile* file) {
 	dbg_printf("valid!\n");
 
 	if (
-		strncmp(baseTid, "ADA", 3) == 0    // Diamond
+		dlpVirtualSlot1Active || strncmp(baseTid, "ADA", 3) == 0    // Diamond
 		|| strncmp(baseTid, "APA", 3) == 0 // Pearl
 		|| strncmp(baseTid, "CPU", 3) == 0 // Platinum
 		|| strncmp(baseTid, "IPK", 3) == 0 // HG
@@ -577,7 +595,8 @@ static void loadBinary_ARM7(const tDSiHeader* dsiHeaderTemp, aFile* file) {
 	) {
 		// Fix Pokemon games needing header data.
 		tNDSHeader* ndsHeaderPokemon = (tNDSHeader*)NDS_HEADER_POKEMON;
-		fileRead((char*)ndsHeaderPokemon, file, 0, 0x160);
+		if (dlpVirtualSlot1Empty) toncset(ndsHeaderPokemon, 0xFF, 0x160);
+		else if (fileRead((char*)ndsHeaderPokemon, file, 0, 0x160) != 0x160 && dlpVirtualSlot1Active) errorOutput();
 		pkmnHeader = true;
 	}
 
@@ -588,13 +607,9 @@ static void loadBinary_ARM7(const tDSiHeader* dsiHeaderTemp, aFile* file) {
 	u8 baseDeviceSize = 0;
 	fileRead((char*)&baseDeviceSize, file, 0x14, sizeof(u8));
 
-	romPaddingSize = 0x20000 << baseDeviceSize;
-	if (baseRomSize == 0 ? (romSize > romPaddingSize) : (baseRomSize > romPaddingSize)) {
+	romPaddingSize = getRomPaddingSize(baseRomSize ? baseRomSize : romSize, baseDeviceSize);
+	if (baseDeviceSize <= 14 && romPaddingSize > (0x20000u << baseDeviceSize)) {
 		dbg_printf("ROM size is larger than device size!\n");
-		while (baseRomSize == 0 ? (romSize > romPaddingSize) : (baseRomSize > romPaddingSize)) {
-			baseDeviceSize++;
-			romPaddingSize = 0x20000 << baseDeviceSize;
-		}
 	}
 
 	arm9iromOffset = (u32)dsiHeaderTemp->arm9iromOffset;
@@ -1102,11 +1117,14 @@ static void setMemoryAddress(const tNDSHeader* ndsHeader, const module_params_t*
     // figure out what is 0x027ffc10, somehow related to cardId check
     //*((u32*)(isSdk5(moduleParams) ? 0x02fffc10 : 0x027ffc10)) = 1;
 
-	if (pkmnHeader) {
+	if (pkmnHeader && !dlpVirtualSlot1Active) {
 		// Make the Pokemon game code ADAJ.
 		const char gameCodePokemon[] = { 'A', 'D', 'A', 'J' };
 		tNDSHeader* ndsHeaderPokemon = (tNDSHeader*)NDS_HEADER_POKEMON;
 		tonccpy(ndsHeaderPokemon->gameCode, gameCodePokemon, 4);
+	}
+	if (dlpVirtualSlot1Active) {
+		dlpVirtualSlot1SetCardHeader((const void*)NDS_HEADER_POKEMON, isSdk5(moduleParams));
 	}
 
     // Set memory values expected by loaded NDS
@@ -1184,6 +1202,8 @@ u32 loadCe9Slot2Heap(u32* dst) {
 int arm7_main(void) {
 	// nocashMessage("bootloader");
 
+	const bool dlpReload = (*(u32*)0x02FFFE0C == 0x52504C44); // DLPR
+	dlpRamPending = dlpReload && *(u32*)DLP_RAM_HEADER_FLAG == DLP_RAM_MAGIC;
 	initMBK();
 
 	// Wait for ARM9 to at least start
@@ -1191,7 +1211,7 @@ int arm7_main(void) {
 
 	// Get ARM7 to clear RAM
 	// nocashMessage("Getting ARM7 to clear RAM...\n");
-	resetMemory_ARM7();
+	resetMemory_ARM7(dlpReload);
 
 	arm9_macroMode = macroMode;
 
@@ -1219,7 +1239,7 @@ int arm7_main(void) {
 	dbg_printf(version);
 	dbg_printf("\n\n");
 
-	*(vu32*)(0x02000000) = 0; // Clear debug RAM check flag
+	if (!dlpRamPending) *(vu32*)(0x02000000) = 0; // Clear debug RAM check flag
 
 	getFileFromCluster(&srParamsFile, srParamsFileCluster);
 	fileRead((char*)&softResetParams, &srParamsFile, 0, 0x50);
@@ -1238,6 +1258,42 @@ int arm7_main(void) {
 	//aFile bootNdsFile = getBootFileCluster(bootName, 0);
 
 	// ROM file
+	{
+		aFile sessionFile;
+		DlpSession session = {0};
+		getFileFromCluster(&sessionFile, pageFileCluster);
+		if (fileRead((char*)&session, &sessionFile, DLP_SESSION_PAGE_OFFSET, sizeof(session)) != sizeof(session)) {
+			if (srlFromPageFile) errorOutput();
+			session.magic = 0;
+		}
+		dlpSetSession(&session, srlFromPageFile);
+		if (dlpVirtualSlot1Active && !dlpVirtualSlot1Empty) {
+			if (session.flags != (DLP_VIRTUAL_SLOT1_ROM_FAT | DLP_VIRTUAL_SLOT1_SAVE_FAT)) errorOutput();
+			storedFileCluster = session.romCluster;
+			saveFileCluster = session.saveCluster;
+			romSize = session.romSize;
+			saveSize = session.saveSize;
+			saveRelocation = true;
+			dataToPreloadAddr = dataToPreloadSize = 0;
+		}
+		if (dlpVirtualSlot1Empty) { saveSize = 0; saveRelocation = true; }
+		if (dlpSessionActive && srlFromPageFile) {
+			if (session.reloadMagic == DLP_RELOAD_MAGIC && session.reloadCluster >= 2
+			 && session.reloadCluster < 0x0FFFFFF0) {
+				aFile reload;
+				getFileFromCluster(&reload, session.reloadCluster);
+				if (fileRead((char*)CARDENGINE_ARM9_LOCATION_BUFFERED, &reload, DLP_RELOAD_CE9_OFFSET, 0x10000) != 0x10000
+					|| fileRead((char*)CARDENGINE_ARM7_LOCATION_BUFFERED, &reload, DLP_RELOAD_CE7_OFFSET, 0x1080) != 0x1080
+					|| fileRead((char*)CHEAT_ENGINE_LOCATION_B4DS_BUFFERED, &reload, DLP_RELOAD_CHEAT_OFFSET, 0x400) != 0x400) errorOutput();
+			}
+			++session.generation;
+			session.checksum = dlpSessionChecksum(&session);
+			if (fileWrite((char*)&session, &sessionFile, DLP_SESSION_PAGE_OFFSET, sizeof(session)) != sizeof(session)) errorOutput();
+		}
+	}
+	// Keep wireless powered until the received SRL reinitializes it.
+	if (dlpReload && !(dlpSessionActive && srlFromPageFile)) REG_POWERCNT = 1;
+
 	getFileFromCluster(&romFile, storedFileCluster);
 
 	// Invalid file cluster specified
@@ -1256,7 +1312,7 @@ int arm7_main(void) {
 
 	int errorCode;
 
-	tDSiHeader dsiHeaderTemp;
+	tDSiHeader dsiHeaderTemp = {0};
 
 	// Wait for ARM9 to finish clearing memory
 	while (arm9_stateFlag != ARM9_READY);
@@ -1275,9 +1331,11 @@ int arm7_main(void) {
 	}
 
 	// File containing cached patch offsets
-	getFileFromCluster(&patchOffsetCacheFile, patchOffsetCacheFileCluster);
-	fileRead((char*)&patchOffsetCache, &patchOffsetCacheFile, 0, 4);
-	if (patchOffsetCache.ver == patchOffsetCacheFileVersion
+	if (!dlpSessionActive) {
+		getFileFromCluster(&patchOffsetCacheFile, patchOffsetCacheFileCluster);
+		fileRead((char*)&patchOffsetCache, &patchOffsetCacheFile, 0, 4);
+	}
+	if (!dlpSessionActive && patchOffsetCache.ver == patchOffsetCacheFileVersion
 	 && patchOffsetCache.type == 1) {	// 0 = Regular, 1 = B4DS, 2 = HB
 		fileRead((char*)&patchOffsetCache, &patchOffsetCacheFile, 0, sizeof(patchOffsetCacheContents));
 	} else {
@@ -1287,7 +1345,7 @@ int arm7_main(void) {
 	}
 
 	s32 mainScreen = 0;
-	fileRead((char*)&mainScreen, &patchOffsetCacheFile, 0x1FC, sizeof(u32));
+	if (!dlpSessionActive) fileRead((char*)&mainScreen, &patchOffsetCacheFile, 0x1FC, sizeof(u32));
 
 	patchOffsetCacheFilePrevCrc = swiCRC16(0xFFFF, &patchOffsetCache, sizeof(patchOffsetCacheContents));
 
@@ -1315,7 +1373,7 @@ int arm7_main(void) {
 
 	my_readUserSettings(ndsHeader); // Header has to be loaded first
 
-	baseChipID = getChipId(pkmnHeader ? (tNDSHeader*)NDS_HEADER_POKEMON : ndsHeader, moduleParams);
+	baseChipID = dlpVirtualSlot1Empty ? 0xFFFFFFFFu : getChipId(pkmnHeader ? (tNDSHeader*)NDS_HEADER_POKEMON : ndsHeader, moduleParams);
 
 	if ((REG_SNDEXTCNT & SNDEXTCNT_ENABLE) && ((!soundFreq && (REG_SNDEXTCNT & BIT(13))) || (soundFreq && !(REG_SNDEXTCNT & BIT(13))))) {
 		if (soundFreq) {
@@ -1338,7 +1396,7 @@ int arm7_main(void) {
 
 	u32 clonebootFlag = 0;
 	fileRead((char*)&clonebootFlag, &romFile, ((romSize-0x88) <= baseRomSize) ? (romSize-0x88) : baseRomSize, sizeof(u32));
-	const bool usesCloneboot = (clonebootFlag == 0x16361);
+	const bool usesCloneboot = (!dlpSessionActive && clonebootFlag == 0x16361);
 	if (usesCloneboot) {
 		dbg_printf("Cloneboot detected\n");
 	}
@@ -1403,7 +1461,18 @@ int arm7_main(void) {
 		overlayPatch = true; // Allow overlay patching for SM64DS ROM hacks (ex. Mario's Holiday)
 	}
 
-	tonccpy((u8*)CARDENGINE_ARM7_LOCATION, (u8*)CARDENGINE_ARM7_LOCATION_BUFFERED, 0x1080);
+	// HNDA autoloads ARM7 code at 0x0380F400, inside the usual resident
+	// helper range. Keep the initial receiver's helper in reserved main RAM.
+	const u32 ce7Location = dlpIsInitialReceiver(ndsHeader->gameCode) ? 0x023F0000 : CARDENGINE_ARM7_LOCATION;
+	u32* ce7Source = (u32*)CARDENGINE_ARM7_LOCATION_BUFFERED;
+	if (ce7Location != CARDENGINE_ARM7_LOCATION) {
+		for (u32 i = 0; i < 0x1080/sizeof(u32); ++i) {
+			if (ce7Source[i] >= CARDENGINE_ARM7_LOCATION && ce7Source[i] < CARDENGINE_ARM7_LOCATION+0x1080) {
+				ce7Source[i] += ce7Location-CARDENGINE_ARM7_LOCATION;
+			}
+		}
+	}
+	tonccpy((u8*)ce7Location, ce7Source, 0x1080);
 	toncset((u8*)CARDENGINE_ARM7_LOCATION_BUFFERED, 0, 0x1080);
 
 	ce9Location = *(u32*)CARDENGINE_ARM9_LOCATION_BUFFERED;
@@ -1617,9 +1686,9 @@ int arm7_main(void) {
 		}
 	}
 
-	ROMinRAM = isROMLoadableInRAM(&dsiHeaderTemp, &dsiHeaderTemp.ndshdr, romTid, moduleParams, usesCloneboot); // If possible, set to load ROM into RAM
+	ROMinRAM = dlpSessionActive ? 0 : isROMLoadableInRAM(&dsiHeaderTemp, &dsiHeaderTemp.ndshdr, romTid, moduleParams, usesCloneboot); // If possible, set to load ROM into RAM
 	errorCode = patchCardNds(
-		(cardengineArm7*)CARDENGINE_ARM7_LOCATION,
+		(cardengineArm7*)ce7Location,
 		(cardengineArm9*)ce9Location,
 		ndsHeader,
 		moduleParams,
@@ -1673,7 +1742,7 @@ int arm7_main(void) {
 	toncset((u32*)0x0380C000, 0, 0x2700);
 
 	errorCode = hookNdsRetailArm7(
-		(cardengineArm7*)CARDENGINE_ARM7_LOCATION,
+		(cardengineArm7*)ce7Location,
 		ndsHeader,
 		moduleParams,
 		cheatFileCluster,
@@ -1697,7 +1766,7 @@ int arm7_main(void) {
 		if (ndsHeader->unitCode == 3) {
 			loadIOverlaysintoRAM(&dsiHeaderTemp, &romFile, usesCloneboot);
 		}
-	} else {
+	} else if (!dlpSessionActive) {
 		loadOverlaysintoFile(ndsHeader, moduleParams, &romFile);
 		loadROMPartintoRAM(ndsHeader, &romFile);
 	}
@@ -1748,7 +1817,7 @@ int arm7_main(void) {
 	} */
 
 	patchOffsetCacheFileNewCrc = swiCRC16(0xFFFF, &patchOffsetCache, sizeof(patchOffsetCacheContents));
-	if (patchOffsetCacheFileNewCrc != patchOffsetCacheFilePrevCrc) {
+	if (!dlpSessionActive && patchOffsetCacheFileNewCrc != patchOffsetCacheFilePrevCrc) {
 		fileWrite((char*)&patchOffsetCache, &patchOffsetCacheFile, 0, sizeof(patchOffsetCacheContents));
 	}
 

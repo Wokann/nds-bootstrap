@@ -2,6 +2,7 @@
 #include "patch.h"
 #include "nds_header.h"
 #include "find.h"
+#include "dlp.h"
 #include "debug_file.h"
 
 //#define memset __builtin_memset
@@ -1972,6 +1973,16 @@ u32* findCardSetDma(const tNDSHeader* ndsHeader, const module_params_t* modulePa
 }
 
 u32* findSrlStartOffset9(const tNDSHeader* ndsHeader) {
+	// Volume 1's eoo helper is a separate autoload section. Intercept its
+	// caller before it requests a native ARM7 boot, so storage remains live.
+	static const u32 stationHandoffSignature[7] = {
+		0xE3A00000, 0xEB0165B7, 0xEB0165B7, 0xEB0165D7,
+		0xE28DD004, 0xE8BD4030, 0xE12FFF1E
+	};
+	if (dlpSessionActive) {
+		u32* station = findOffset((u32*)ndsHeader->arm9destination, iUncompressedSize, stationHandoffSignature, 7);
+		if (station) return station;
+	}
 	// dbg_printf("findSrlStartOffset9\n");
 
     u32* offset = findOffset(

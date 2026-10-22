@@ -39,6 +39,7 @@
 #include <nds/system.h>
 
 #include "locations.h"
+#include "dlp.h"
 #include "common.h"
 #include "loading.h"
 
@@ -138,6 +139,8 @@ Modified by Chishm:
 --------------------------------------------------------------------------*/
 void arm9_main(void) {
  	register int i;
+	const bool ramDlp = (*(vu32*)DLP_RAM_HEADER_FLAG == DLP_RAM_MAGIC
+		&& *(vu32*)0x02FFFE0C == 0x52504C44);
 
 	// Set shared ram to ARM7
 	WRAM_CR = 0x03;
@@ -145,6 +148,8 @@ void arm9_main(void) {
 
 	initMBKARM9();
 
+	const u32 savedRam0 = *(vu32*)0x02000000;
+	const u32 savedRam4 = *(vu32*)0x02400000;
 	*(vu32*)(0x02000000) = 0x314D454D;
 	*(vu32*)(0x02400000) = 0x324D454D;
 	if ((*(vu32*)(0x02000000) == 0x314D454D) && (*(vu32*)(0x02400000) == 0x324D454D)) {
@@ -152,6 +157,10 @@ void arm9_main(void) {
 		dsDebugRam = ((vu8)((vu32)REG_SCFG_EXT+3) == 0);
 	}
 
+	if (ramDlp) {
+		*(vu32*)0x02000000 = savedRam0;
+		*(vu32*)0x02400000 = savedRam4;
+	}
 	arm9_stateFlag = ARM9_START;
 
 	REG_IME = 0;
@@ -214,8 +223,10 @@ void arm9_main(void) {
 	dmaFill9(0, VRAM_A, 0x20000*3);		// Banks A, B, C
 	dmaFill9(0, VRAM_D, 272*1024);		// Banks D (excluded), E, F, G, H, I
 
-	memset_addrs_arm9(0x02000620, 0x02084000);	// clear part of EWRAM
-	memset_addrs_arm9(0x02280000, IMAGES_LOCATION);	// clear part of EWRAM - except before nds-bootstrap images
+	if (!ramDlp) {
+		memset_addrs_arm9(0x02000620, 0x02084000);	// clear part of EWRAM
+		memset_addrs_arm9(0x02280000, IMAGES_LOCATION);	// clear part of EWRAM - except before nds-bootstrap images
+	}
 	if (extendedMemory) {
 		dmaFill9(0, (u32*)0x02400000, 0x3FC000);
 		dmaFill9(0, (u32*)0x027FF000, dsDebugRam ? 0x1000 : 0x801000);

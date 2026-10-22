@@ -69,6 +69,7 @@
 #include "find.h"
 #include "hook.h"
 #include "common.h"
+#include "dlp.h"
 #include "igm_text.h"
 #include "locations.h"
 #include "value_bits.h"
@@ -102,6 +103,7 @@ extern u32 gbaFileCluster;
 extern u32 gbaSaveFileCluster;
 extern u32 romSize;
 extern u32 saveSize;
+extern u8 saveRelocation;
 // extern u32 gbaRomSize;
 // extern u32 gbaSaveSize;
 extern u32 dataToPreloadAddr[4];
@@ -166,6 +168,12 @@ static aFile patchOffsetCacheFile;
 u32 waitSysCyclesOffset = 0;
 static u32 softResetParams[0x50/4] = {0};
 bool srlFromPageFile = false;
+bool dlpSessionActive = false;
+bool dlpPhysicalSlot1Active = false;
+bool dlpVirtualSlot1Active = false;
+bool dlpVirtualSlot1Empty = false;
+bool dlpReceiverOnFlashcard = false;
+static bool dlpVirtualSlot1NeedsDldi = false;
 u32 srlAddr = 0;
 tNDSHeader* ndsHeader = NULL;
 u32 baseArm9Off = 0;
@@ -736,9 +744,11 @@ static void loadBinary_ARM7(const tDSiHeader* dsiHeaderTemp, aFile* file) {
 			}
 		}
 
-		fileRead((char*)dsiHeaderTemp, &pageFile, 0x2BFE00, 0x160);
-		fileRead(dsiHeaderTemp->ndshdr.arm9destination, &pageFile, 0x14000, dsiHeaderTemp->ndshdr.arm9binarySize);
-		fileRead(dsiHeaderTemp->ndshdr.arm7destination, &pageFile, 0x2C0000, dsiHeaderTemp->ndshdr.arm7binarySize);
+		if (fileRead((char*)dsiHeaderTemp, &pageFile, 0x2BFE00, 0x160) != 0x160 && dlpSessionActive) errorOutput();
+		if (fileRead(dsiHeaderTemp->ndshdr.arm9destination, &pageFile, 0x14000, dsiHeaderTemp->ndshdr.arm9binarySize)
+			!= dsiHeaderTemp->ndshdr.arm9binarySize && dlpSessionActive) errorOutput();
+		if (fileRead(dsiHeaderTemp->ndshdr.arm7destination, &pageFile, 0x2C0000, dsiHeaderTemp->ndshdr.arm7binarySize)
+			!= dsiHeaderTemp->ndshdr.arm7binarySize && dlpSessionActive) errorOutput();
 	} else {
 		if (!gameOnFlashcard) {
 			// Test NDMA readability
@@ -785,7 +795,7 @@ static void loadBinary_ARM7(const tDSiHeader* dsiHeaderTemp, aFile* file) {
 	char baseTid[5] = {0};
 	fileRead((char*)&baseTid, file, 0xC, 4);
 	if (
-		strncmp(baseTid, "ADA", 3) == 0    // Diamond
+		dlpVirtualSlot1Active || strncmp(baseTid, "ADA", 3) == 0    // Diamond
 		|| strncmp(baseTid, "APA", 3) == 0 // Pearl
 		|| strncmp(baseTid, "CPU", 3) == 0 // Platinum
 		|| strncmp(baseTid, "IPK", 3) == 0 // HG
@@ -793,7 +803,8 @@ static void loadBinary_ARM7(const tDSiHeader* dsiHeaderTemp, aFile* file) {
 	) {
 		// Fix Pokemon games needing header data.
 		tNDSHeader* ndsHeaderPokemon = (tNDSHeader*)NDS_HEADER_POKEMON;
-		fileRead((char*)ndsHeaderPokemon, file, 0, 0x160);
+		if (dlpVirtualSlot1Empty) toncset(ndsHeaderPokemon, 0xFF, 0x160);
+		else if (fileRead((char*)ndsHeaderPokemon, file, 0, 0x160) != 0x160 && dlpVirtualSlot1Active) errorOutput();
 		pkmnHeader = true;
 	} else {
 		pkmnGen5 = (strncmp(baseTid, "IRB", 3) == 0 || strncmp(baseTid, "IRA", 3) == 0 || strncmp(baseTid, "IRE", 3) == 0 || strncmp(baseTid, "IRD", 3) == 0);
@@ -816,13 +827,9 @@ static void loadBinary_ARM7(const tDSiHeader* dsiHeaderTemp, aFile* file) {
 	u8 baseDeviceSize = 0;
 	fileRead((char*)&baseDeviceSize, file, 0x14, sizeof(u8));
 
-	romPaddingSize = 0x20000 << baseDeviceSize;
-	if (baseRomSize == 0 ? (romSize > romPaddingSize) : (baseRomSize > romPaddingSize)) {
+	romPaddingSize = getRomPaddingSize(baseRomSize ? baseRomSize : romSize, baseDeviceSize);
+	if (baseDeviceSize <= 14 && romPaddingSize > (0x20000u << baseDeviceSize)) {
 		dbg_printf("ROM size is larger than device size!\n");
-		while (baseRomSize == 0 ? (romSize > romPaddingSize) : (baseRomSize > romPaddingSize)) {
-			baseDeviceSize++;
-			romPaddingSize = 0x20000 << baseDeviceSize;
-		}
 	}
 
 	sdmmc_set_ndma_slot(4);
@@ -1550,11 +1557,14 @@ static void setMemoryAddress(const tNDSHeader* ndsHeader, const module_params_t*
 		return;
 	}*/
 
-	if (pkmnHeader) {
+	if (pkmnHeader && !dlpVirtualSlot1Active) {
 		// Make the Pokemon game code ADAJ.
 		const char gameCodePokemon[] = { 'A', 'D', 'A', 'J' };
 		tNDSHeader* ndsHeaderPokemon = (tNDSHeader*)NDS_HEADER_POKEMON;
 		tonccpy(ndsHeaderPokemon->gameCode, gameCodePokemon, 4);
+	}
+	if (dlpVirtualSlot1Active) {
+		dlpVirtualSlot1SetCardHeader((const void*)NDS_HEADER_POKEMON, isSdk5(moduleParams));
 	}
 
     // Set memory values expected by loaded NDS
@@ -1638,7 +1648,7 @@ int arm7_main(void) {
 		}
 	}
 
-	if (gameOnFlashcard || saveOnFlashcard) {
+	if (gameOnFlashcard || saveOnFlashcard || bootstrapOnFlashcard) {
 		// Init Slot-1 card
 		if (!FAT_InitFiles(initDisc, true)) {
 			nocashMessage("!FAT_InitFiles");
@@ -1677,6 +1687,39 @@ int arm7_main(void) {
 		}
 	}
 
+	{
+		aFile sessionFile;
+		DlpSession session = {0};
+		getFileFromCluster(&sessionFile, pageFileCluster, bootstrapOnFlashcard);
+		if (fileRead((char*)&session, &sessionFile, DLP_SESSION_PAGE_OFFSET, sizeof(session)) != sizeof(session)) {
+			if (srlFromPageFile) errorOutput();
+			session.magic = 0;
+		}
+		dlpSetSession(&session, srlFromPageFile);
+		dlpReceiverOnFlashcard = gameOnFlashcard;
+		dlpVirtualSlot1NeedsDldi = dlpSessionActive && session.mode == DLP_SLOT1_VIRTUAL && (session.flags & (DLP_VIRTUAL_SLOT1_ROM_FAT | DLP_VIRTUAL_SLOT1_SAVE_FAT));
+		if (dlpVirtualSlot1NeedsDldi && !gameOnFlashcard && !saveOnFlashcard && !bootstrapOnFlashcard) {
+			if (!FAT_InitFiles(initDisc, true)) errorOutput();
+		}
+		if (dlpVirtualSlot1Active && !dlpVirtualSlot1Empty) {
+			storedFileCluster = session.romCluster;
+			saveFileCluster = session.saveCluster;
+			romSize = session.romSize;
+			saveSize = session.saveSize;
+			gameOnFlashcard = !!(session.flags & DLP_VIRTUAL_SLOT1_ROM_FAT);
+			saveOnFlashcard = !!(session.flags & DLP_VIRTUAL_SLOT1_SAVE_FAT);
+			saveRelocation = true;
+			toncset(dataToPreloadAddr, 0, sizeof(u32)*4);
+			toncset(dataToPreloadSize, 0, sizeof(u32)*4);
+		}
+		if (dlpVirtualSlot1Empty) { saveSize = 0; saveRelocation = true; }
+		if (dlpSessionActive && srlFromPageFile) {
+			++session.generation;
+			session.checksum = dlpSessionChecksum(&session);
+			if (fileWrite((char*)&session, &sessionFile, DLP_SESSION_PAGE_OFFSET, sizeof(session)) != sizeof(session)) errorOutput();
+		}
+	}
+
 	// ROM file
 	aFile* romFile = (aFile*)(dsiEnhancedMbk ? ROM_FILE_LOCATION_ALT : ROM_FILE_LOCATION);
 	getFileFromCluster(romFile, storedFileCluster, gameOnFlashcard);
@@ -1702,7 +1745,7 @@ int arm7_main(void) {
 
 	int errorCode;
 
-	tDSiHeader dsiHeaderTemp;
+	tDSiHeader dsiHeaderTemp = {0};
 
 	// Load the NDS file
 	dbg_printf("Loading the NDS file...\n");
@@ -1746,9 +1789,11 @@ int arm7_main(void) {
 	}
 
 	// File containing cached patch offsets
-	getFileFromCluster(&patchOffsetCacheFile, patchOffsetCacheFileCluster, gameOnFlashcard);
-	fileRead((char*)&patchOffsetCache, &patchOffsetCacheFile, 0, 4);
-	if (patchOffsetCache.ver == patchOffsetCacheFileVersion
+	if (!dlpSessionActive) {
+		getFileFromCluster(&patchOffsetCacheFile, patchOffsetCacheFileCluster, gameOnFlashcard);
+		fileRead((char*)&patchOffsetCache, &patchOffsetCacheFile, 0, 4);
+	}
+	if (!dlpSessionActive && patchOffsetCache.ver == patchOffsetCacheFileVersion
 	 && patchOffsetCache.type == 0) {	// 0 = Regular, 1 = B4DS, 2 = HB
 		fileRead((char*)&patchOffsetCache, &patchOffsetCacheFile, 0, sizeof(patchOffsetCacheContents));
 	} else {
@@ -1758,7 +1803,7 @@ int arm7_main(void) {
 	}
 
 	s32 mainScreen = 0;
-	fileRead((char*)&mainScreen, &patchOffsetCacheFile, 0x1FC, sizeof(u32));
+	if (!dlpSessionActive) fileRead((char*)&mainScreen, &patchOffsetCacheFile, 0x1FC, sizeof(u32));
 
 	patchOffsetCacheFilePrevCrc = swiCRC16(0xFFFF, &patchOffsetCache, sizeof(patchOffsetCacheContents));
 
@@ -1884,7 +1929,7 @@ int arm7_main(void) {
 
 	my_readUserSettings(ndsHeader); // Header has to be loaded first
 
-	baseChipID = getChipId(pkmnHeader ? (tNDSHeader*)NDS_HEADER_POKEMON : ndsHeader, moduleParams);
+	baseChipID = dlpVirtualSlot1Empty ? 0xFFFFFFFFu : getChipId(pkmnHeader ? (tNDSHeader*)NDS_HEADER_POKEMON : ndsHeader, moduleParams);
 
 	cheatSizeTotal = wideCheatSize+cheatSize+(apPatchIsCheat ? apPatchSize : 0);
 	tonccpy(cheatEngineBuffer, (char*)CHEAT_ENGINE_BUFFERED_LOCATION, 0x400);
@@ -1952,7 +1997,7 @@ int arm7_main(void) {
 		toncset((u32*)UNPATCHED_FUNCTION_LOCATION, 0, 0x40);
 
 		patchOffsetCacheFileNewCrc = swiCRC16(0xFFFF, &patchOffsetCache, sizeof(patchOffsetCacheContents));
-		if (patchOffsetCacheFileNewCrc != patchOffsetCacheFilePrevCrc) {
+		if (!dlpSessionActive && patchOffsetCacheFileNewCrc != patchOffsetCacheFilePrevCrc) {
 			fileWrite((char*)&patchOffsetCache, &patchOffsetCacheFile, 0, sizeof(patchOffsetCacheContents));
 		}
 	  } else { */
@@ -1995,7 +2040,7 @@ int arm7_main(void) {
 		u32 clonebootFlag = 0;
 		const u32 clonebootOffset = ((romSize-0x88) <= baseRomSize) ? (romSize-0x88) : baseRomSize;
 		fileRead((char*)&clonebootFlag, romFile, clonebootOffset, sizeof(u32));
-		const bool usesCloneboot = (clonebootFlag == 0x16361);
+		const bool usesCloneboot = (!dlpSessionActive && clonebootFlag == 0x16361);
 		if (usesCloneboot) {
 			dbg_printf("Cloneboot detected\n");
 		}
@@ -2158,7 +2203,7 @@ int arm7_main(void) {
 		toncset((u32*)UNPATCHED_FUNCTION_LOCATION, 0, 0x40);
 
 		patchOffsetCacheFileNewCrc = swiCRC16(0xFFFF, &patchOffsetCache, sizeof(patchOffsetCacheContents));
-		if (patchOffsetCacheFileNewCrc != patchOffsetCacheFilePrevCrc) {
+		if (!dlpSessionActive && patchOffsetCacheFileNewCrc != patchOffsetCacheFilePrevCrc) {
 			fileWrite((char*)&patchOffsetCache, &patchOffsetCacheFile, 0, sizeof(patchOffsetCacheContents));
 		}
 
@@ -2299,7 +2344,7 @@ int arm7_main(void) {
 		}
 
 		tonccpy((u32*)ce7Location, (u32*)CARDENGINEI_ARM7_BUFFERED_LOCATION, ce7Size);
-		if (gameOnFlashcard || saveOnFlashcard) {
+		if (gameOnFlashcard || saveOnFlashcard || dlpVirtualSlot1NeedsDldi) {
 			if (!dldiPatchBinary((data_t*)ce7Location, ce7Size-0x400, (data_t*)((ROMsupportsDsiMode(ndsHeader) && dsiModeConfirmed) ? 0 : (dsiEnhancedMbk ? CARDENGINEI_ARM7_LOCATION_ALT_DLDI : CARDENGINEI_ARM7_LOCATION_DLDI)))) {
 				dbg_printf("ce7 DLDI patch failed\n");
 				errorOutput();
@@ -2363,13 +2408,13 @@ int arm7_main(void) {
 		u32 clonebootFlag = 0;
 		const u32 clonebootOffset = ((romSize-0x88) <= baseRomSize) ? (romSize-0x88) : baseRomSize;
 		fileRead((char*)&clonebootFlag, romFile, clonebootOffset, sizeof(u32));
-		const bool usesCloneboot = (clonebootFlag == 0x16361);
+		const bool usesCloneboot = (!dlpSessionActive && clonebootFlag == 0x16361);
 		if (usesCloneboot) {
 			dbg_printf("Cloneboot detected\n");
 		}
 
 		// If possible, set to load ROM into RAM
-		const u32 ROMinRAM = isROMLoadableInRAM(&dsiHeaderTemp, &dsiHeaderTemp.ndshdr, romTid, moduleParams, usesCloneboot);
+		const u32 ROMinRAM = dlpSessionActive ? 0 : isROMLoadableInRAM(&dsiHeaderTemp, &dsiHeaderTemp.ndshdr, romTid, moduleParams, usesCloneboot);
 
 		errorCode = patchCardNds(
 			(cardengineArm7*)ce7Location,
@@ -2453,7 +2498,7 @@ int arm7_main(void) {
 		);
 
 		patchOffsetCacheFileNewCrc = swiCRC16(0xFFFF, &patchOffsetCache, sizeof(patchOffsetCacheContents));
-		if (patchOffsetCacheFileNewCrc != patchOffsetCacheFilePrevCrc) {
+		if (!dlpSessionActive && patchOffsetCacheFileNewCrc != patchOffsetCacheFilePrevCrc) {
 			fileWrite((char*)&patchOffsetCache, &patchOffsetCacheFile, 0, sizeof(patchOffsetCacheContents));
 		}
 
@@ -2484,7 +2529,7 @@ int arm7_main(void) {
 			dma_twlFill32(0, 0, (u32*)IPS_LOCATION, apPatchSize);	// Clear IPS patch
 		}
 
-		if (!ROMinRAM && overlayPatch) {
+		if (!dlpSessionActive && !ROMinRAM && overlayPatch) {
 			aFile* apFixOverlaysFile = (aFile*)((ROMsupportsDsiMode(ndsHeader) && dsiModeConfirmed) ? OVL_FILE_LOCATION_TWLSDK : OVL_FILE_LOCATION_MAINMEM);
 			getFileFromCluster(apFixOverlaysFile, apFixOverlaysCluster, gameOnFlashcard);
 			buildFatTableCacheCompressed(apFixOverlaysFile);
@@ -2513,11 +2558,11 @@ int arm7_main(void) {
 			dbg_printf("Overlays cached to a file\n");
 		}
 
-		if (!ROMinRAM && ((ROMsupportsDsiMode(ndsHeader) && !isDSiWare && (!dsiModeConfirmed || consoleModel > 0)) || !ROMsupportsDsiMode(ndsHeader))) {
+		if (!dlpSessionActive && !ROMinRAM && ((ROMsupportsDsiMode(ndsHeader) && !isDSiWare && (!dsiModeConfirmed || consoleModel > 0)) || !ROMsupportsDsiMode(ndsHeader))) {
 			loadROMPartIntoRAM(ndsHeader, romFile);
 		}
 
-		if (!ROMinRAM && dsiWramAccess && !dsiWramMirrored && (!ROMsupportsDsiMode(ndsHeader) || !dsiModeConfirmed)) {
+		if (!dlpSessionActive && !ROMinRAM && dsiWramAccess && !dsiWramMirrored && (!ROMsupportsDsiMode(ndsHeader) || !dsiModeConfirmed)) {
 			loadNitroFileInfoIntoRAM(ndsHeader, romFile);
 		}
 

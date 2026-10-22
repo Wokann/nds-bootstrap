@@ -5,6 +5,7 @@
 #include "patch.h"
 #include "find.h"
 #include "common.h"
+#include "dlp.h"
 //#include "value_bits.h"
 #include "locations.h"
 #include "tonccpy.h"
@@ -435,22 +436,30 @@ u32 patchCardNdsArm7(
 		return ERR_LOAD_OTHR;
 	}
 
-	if (!(valueBits & ROMinRAM) && !(valueBits & gameOnFlashcard)) {
+	if (!dlpPhysicalSlot1Active && !(valueBits & ROMinRAM) && !(valueBits & gameOnFlashcard)) {
 		patchCardCheckPullOut(ce7, ndsHeader, moduleParams);
 	}
 
 	extern bool softResetMb;
+	extern bool dlpStationForwarder;
 	if (softResetMb) {
 		patchSrlStart(ce7, ndsHeader);
 	}
 
+	if (dlpPhysicalSlot1Active) {
+		patchSleepInputWrite(ce7, ndsHeader, moduleParams, false);
+		patchSwiHalt(ce7, ndsHeader, moduleParams);
+		fixForDifferentBios(ce7, ndsHeader, moduleParams);
+		return ERR_NONE;
+	}
+
+	u32 saveResult = 0;
 	if (a7GetReloc(ndsHeader, moduleParams)) {
 		patchSleepInputWrite(ce7, ndsHeader, moduleParams, buttonsRemapped);
 		patchMirrorCheck(ndsHeader, moduleParams);
 		patchVramWifiBinaryLoad(ndsHeader, moduleParams);
-		u32 saveResult = 0;
 
-		if (valueBits & saveRelocation) {
+		if ((valueBits & saveRelocation) && !dlpStationForwarder) {
 			if (ndsHeader->arm7binarySize==0x2352C || ndsHeader->arm7binarySize==0x235DC || ndsHeader->arm7binarySize==0x23CAC || ndsHeader->arm7binarySize==0x245C0 || ndsHeader->arm7binarySize==0x245C4) {
 				saveResult = savePatchInvertedThumb(ce7, ndsHeader, moduleParams);
 			} else if (moduleParams->sdk_version > 0x5000000) {
@@ -469,6 +478,8 @@ u32 patchCardNdsArm7(
 	} else {
 		patchSleepInputWrite(ce7, ndsHeader, moduleParams, false);
 	}
+
+	if (dlpVirtualSlot1Active && !dlpStationForwarder && !saveResult) return ERR_LOAD_OTHR;
 
 	patchSwiHalt(ce7, ndsHeader, moduleParams);
 

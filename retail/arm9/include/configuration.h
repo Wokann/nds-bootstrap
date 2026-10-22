@@ -12,6 +12,11 @@ typedef struct configuration {
 	char* ndsPath;
 	char* appPath;
 	char* savPath;
+	int dlpSlot1Mode; // -1: no Slot-1 override; 0: physical card; 1: virtual ROM/SAV
+	char* dlpVirtualSlot1RomPath;
+	char* dlpVirtualSlot1SavPath;
+	bool dlpVirtualSlot1NeedsDldi;
+	bool dlpSessionActive;
 	char* prvPath;
 	char* bnrPath;
 	char bannerSavPath[64];

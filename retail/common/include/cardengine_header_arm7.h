@@ -112,6 +112,9 @@ typedef struct cardengineArm7 {
 		23: clearRamOnReset
 		24: saveRelocation
 		25: asyncCardReadMinimal
+		26: dlpReceiverOnFlashcard (keep reset/cache files on the receiver's volume)
+		27: dlpSession
+		28: dlpVirtualSlot1Active
 		30: i2cBricked
 		31: scfgLocked
 	*/
@@ -153,6 +156,8 @@ typedef struct cardengineArm7B4DS {
 		7: a9IrqHooked
 		8: delayWrites
 		17: sleepMode
+		27: dlpSession
+		28: dlpVirtualSlot1Active
 	*/
 	s32 mainScreen;
 	u32 language; //u8
@@ -199,6 +204,8 @@ typedef struct cardengineArm7 {
 		7: a9IrqHooked
 		8: delayWrites
 		17: sleepMode
+		27: dlpSession
+		28: dlpVirtualSlot1Active
 	*/
 	s32 mainScreen;
 	u32 language; //u8

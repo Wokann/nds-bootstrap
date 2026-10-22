@@ -5,6 +5,7 @@
 #include "patch.h"
 #include "find.h"
 #include "common.h"
+#include "dlp.h"
 #include "value_bits.h"
 #include "locations.h"
 #include "tonccpy.h"
@@ -146,6 +147,9 @@ u16* getOffsetFromBLThumb(const u16* blOffset) {
 }
 
 static bool patchWramClear(const tNDSHeader* ndsHeader) {
+	// The receiver's helper is in protected main RAM. Leave the SDK's
+	// private WRAM clear and autoload destinations intact.
+	if (dlpIsInitialReceiver(ndsHeader->gameCode)) return true;
 	if (arm7newUnitCode == 0) {
 		u32* offset = patchOffsetCache.wramEndAddrOffset;
 		if (!patchOffsetCache.wramEndAddrOffset) {
@@ -576,7 +580,8 @@ u32 patchCardNdsArm7(
 
 	//patchCardCheckPullOut(ce7, ndsHeader, moduleParams);
 
-	const u32 cardId = getChipId(ndsHeader, moduleParams);
+	const tNDSHeader* cardHeader = dlpVirtualSlot1Active ? (tNDSHeader*)NDS_HEADER_POKEMON : ndsHeader;
+	const u32 cardId = dlpVirtualSlot1Empty ? 0xFFFFFFFF : getChipId(cardHeader, moduleParams);
 	u32* cardIdPatch = (u32*)ce7->patches->arm7Functions->cardId;
 	u32* cardIdPatchThumb = (u32*)ce7->patches->arm7FunctionsThumb->cardId;
 	cardIdPatch[2] = cardId;
@@ -586,9 +591,17 @@ u32 patchCardNdsArm7(
 		patchSrlStart(ce7, ndsHeader);
 	}
 
+	if (dlpPhysicalSlot1Active || dlpIsInitialReceiver(ndsHeader->gameCode)) {
+		patchSleepInputWrite(ce7, ndsHeader, moduleParams, false);
+		fixForDSiBios(ce7, ndsHeader, moduleParams);
+		return ERR_NONE;
+	}
+
+	const bool stationForwarder = dlpSessionActive && patchOffsetCache.srlStartOffset9
+		&& patchOffsetCache.srlStartOffset9[3] == DLP_STATION_HANDOFF;
+	u32 saveResult = 0;
 	if (a7GetReloc(ndsHeader, moduleParams)) {
 		patchSleepInputWrite(ce7, ndsHeader, moduleParams, buttonsRemapped);
-		u32 saveResult = 0;
 		// Save Relocation Switch
 		// Only when saveRelocation is turning off(FLASE) and GameCodeMatch is matching(TRUE),
 		// will the save file be located into DS Cartridge as original. 
@@ -616,7 +629,7 @@ u32 patchCardNdsArm7(
 			dbg_hexa(saveRelocation);
 			dbg_printf("\n");
 		}
-		if (saveRelocation || !GameCodeMatch) {
+		if ((!dlpSessionActive || dlpVirtualSlot1Active) && !stationForwarder && (saveRelocation || !GameCodeMatch)) {
 			if (newArm7binarySize==0x2352C || newArm7binarySize==0x235DC || newArm7binarySize==0x23CAC || newArm7binarySize==0x245C0 || newArm7binarySize==0x245C4) {
 				saveResult = savePatchInvertedThumb(ce7, ndsHeader, moduleParams, saveFileCluster);    
 			} else if (isSdk5(moduleParams)) {
@@ -646,6 +659,8 @@ u32 patchCardNdsArm7(
 	} else {
 		patchSleepInputWrite(ce7, ndsHeader, moduleParams, false);
 	}
+
+	if (dlpVirtualSlot1Active && !stationForwarder && !saveResult) return ERR_LOAD_OTHR;
 
 	if (strncmp(romTid, "UBR", 3) == 0) {
 		operaRamPatch();

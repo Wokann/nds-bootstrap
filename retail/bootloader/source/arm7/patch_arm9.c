@@ -4,6 +4,7 @@
 #include "patch.h"
 #include "find.h"
 #include "common.h"
+#include "dlp.h"
 #include "cardengine_header_arm9.h"
 #include "unpatched_funcs.h"
 #include "debug_file.h"
@@ -696,7 +697,7 @@ static bool patchCardSetDma(cardengineArm9* ce9, const tNDSHeader* ndsHeader, co
 static void patchReset(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const module_params_t* moduleParams) {
 	const u32 newReset = (u32)ce9->patches->reset_arm9;
 	const char* romTid = getRomTid(ndsHeader);
-	if (ndsHeader->unitCode == 0 && (strcmp(romTid, "NTRJ") == 0 || strncmp(romTid, "HND", 3) == 0 || strncmp(romTid, "HNE", 3) == 0)) {
+	if (ndsHeader->unitCode == 0 && (dlpSessionActive || strcmp(romTid, "NTRJ") == 0 || strncmp(romTid, "HND", 3) == 0 || strncmp(romTid, "HNE", 3) == 0)) {
 		u32* offset = patchOffsetCache.srlStartOffset9;
 
 		if (!patchOffsetCache.srlStartOffsetChecked) {
@@ -706,11 +707,21 @@ static void patchReset(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const m
 		}
 
 		if (offset) {
-			// Patch
-			offset[0] = 0xE59F1000; // ldr r1, =newReset
-			offset[1] = 0xE59FF000; // ldr pc, =reset_arm9
-			offset[2] = 0x4C525344; // 'DSRL'
-			offset[3] = newReset;
+			const u32 handoffTag = (offset[0] == 0xE3A00000) ? DLP_STATION_HANDOFF : 0x4C525344;
+			// The receiver can call from a main-RAM thread stack. Keep reset's
+			// stack above the RAM cleared while loading the bootstrap again.
+			if (*(u16*)offset == 0xB510) {
+				offset[0] = 0x49022000; // movs r0, #0; ldr r1, =handoffTag
+				offset[1] = 0x46954A02; // ldr r2, =stack; mov sp, r2
+				offset[2] = 0x47184B02; // ldr r3, =newReset; bx r3
+			} else {
+				offset[0] = 0xE3A00000; // mov r0, #0
+				offset[1] = 0xE28F2000; // adr r2, literals
+				offset[2] = 0xE892A002; // ldmia r2, {r1, sp, pc}
+			}
+			offset[3] = handoffTag; // 'DSRL' / 'DEOO'
+			offset[4] = 0x023F8000;
+			offset[5] = newReset;
 			dbg_printf("srlStart location : ");
 			dbg_hexa((u32)offset);
 			dbg_printf("\n\n");
@@ -2847,6 +2858,11 @@ u32 patchCardNdsArm9(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const mod
 
 	if (buttonsRemapped) {
 		patchKeyInputs(ndsHeader, moduleParams);
+	}
+
+	if (dlpPhysicalSlot1Active || dlpIsInitialReceiver(ndsHeader->gameCode)) {
+		patchReset(ce9, ndsHeader, moduleParams);
+		return ERR_NONE;
 	}
 
 	if (isPawsAndClaws(ndsHeader)) {

@@ -464,6 +464,7 @@ static void wramToVram(void) {
 #endif
 
 static inline void cardReadNormal(u8* dst, u32 src, u32 len) {
+	if (ce9->valueBits & BIT(24)) { toncset(dst, 0xFF, len); return; }
 #ifdef DLDI
 	// while (sharedAddr[3]==0x444D4152);	// Wait during a RAM dump
 	fileRead((char*)dst, ((ce9->valueBits & overlaysCached) && src >= ce9->overlaysSrc && src < ndsHeader->arm7romOffset) ? apFixOverlaysFile : romFile, src, len);

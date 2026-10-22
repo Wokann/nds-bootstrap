@@ -7,6 +7,13 @@
 
 const char* getRomTid(const tNDSHeader* ndsHeader);
 
+/* Keep the power-of-two capacity representable even with invalid header values. */
+static inline u32 getRomPaddingSize(u32 romSize, u8 deviceSize) {
+	u32 romPaddingSize = deviceSize <= 14 ? 0x20000u << deviceSize : 0x20000u;
+	while (romPaddingSize < romSize && romPaddingSize <= 0x40000000u) romPaddingSize <<= 1;
+	return romPaddingSize;
+}
+
 /*
 TODO: return the correct ID
 

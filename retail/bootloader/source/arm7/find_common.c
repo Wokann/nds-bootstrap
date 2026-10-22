@@ -22,6 +22,33 @@ u32* memsearch32(const u32* start, u32 dataSize, const u32* find, u32 findSize, 
 	u32 dataLen = dataSize/sizeof(u32);
 	u32 findLen = findSize/sizeof(u32);
 
+	// A hashed Horspool table skips impossible starts. Halfword entries also
+	// work on ARM7's VRAM stack, which cannot store individual bytes.
+	if (findLen >= 2 && findLen <= 64 && dataLen) {
+		u16 skip[256];
+		for (u32 i = 0; i < 256; ++i) skip[i] = findLen;
+		if (forward) {
+			for (u32 i = 0; i+1 < findLen; ++i)
+				skip[(find[i] ^ (find[i] >> 16)) & 255] = findLen-1-i;
+		} else {
+			for (u32 i = findLen-1; i > 0; --i)
+				skip[(find[i] ^ (find[i] >> 16)) & 255] = i;
+		}
+		const u32* addr = start;
+		u32 remaining = dataLen;
+		while (remaining) {
+			u32 j = 0;
+			while (j < findLen && addr[j] == find[j]) ++j;
+			if (j == findLen) return (u32*)addr;
+			const u32 value = addr[forward ? findLen-1 : 0];
+			const u32 step = skip[(value ^ (value >> 16)) & 255];
+			if (step >= remaining) break;
+			remaining -= step;
+			addr = forward ? addr+step : addr-step;
+		}
+		return NULL;
+	}
+
 	const u32* end = forward ? (start + dataLen) : (start - dataLen);
 	for (u32* addr = (u32*)start; addr != end; forward ? ++addr : --addr) {
 		bool found = true;
@@ -78,6 +105,33 @@ u32* memsearch32_3(const u32* start, u32 dataSize, const u32* find, const u32* f
 u16* memsearch16(const u16* start, u32 dataSize, const u16* find, u32 findSize, bool forward) {
 	u32 dataLen = dataSize/sizeof(u16);
 	u32 findLen = findSize/sizeof(u16);
+
+	// A hashed Horspool table skips impossible starts. Halfword entries also
+	// work on ARM7's VRAM stack, which cannot store individual bytes.
+	if (findLen >= 2 && findLen <= 64 && dataLen) {
+		u16 skip[256];
+		for (u32 i = 0; i < 256; ++i) skip[i] = findLen;
+		if (forward) {
+			for (u32 i = 0; i+1 < findLen; ++i)
+				skip[(find[i] ^ (find[i] >> 8)) & 255] = findLen-1-i;
+		} else {
+			for (u32 i = findLen-1; i > 0; --i)
+				skip[(find[i] ^ (find[i] >> 8)) & 255] = i;
+		}
+		const u16* addr = start;
+		u32 remaining = dataLen;
+		while (remaining) {
+			u32 j = 0;
+			while (j < findLen && addr[j] == find[j]) ++j;
+			if (j == findLen) return (u16*)addr;
+			const u16 value = addr[forward ? findLen-1 : 0];
+			const u32 step = skip[(value ^ (value >> 8)) & 255];
+			if (step >= remaining) break;
+			remaining -= step;
+			addr = forward ? addr+step : addr-step;
+		}
+		return NULL;
+	}
 
 	const u16* end = forward ? (start + dataLen) : (start - dataLen);
 	for (u16* addr = (u16*)start; addr != end; forward ? ++addr : --addr) {

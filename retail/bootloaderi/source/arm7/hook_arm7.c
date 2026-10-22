@@ -29,6 +29,7 @@
 #include "cheat_engine.h"
 #include "value_bits.h"
 #include "common.h"
+#include "dlp.h"
 #include "patch.h"
 #include "find.h"
 #include "hook.h"
@@ -61,6 +62,9 @@
 #define b_clearRamOnReset BIT(23)
 #define b_saveRelocation BIT(24)
 #define b_asyncCardReadMinimal BIT(25)
+#define b_dlpReceiverOnFlashcard BIT(26)
+#define b_dlpSession BIT(27)
+#define b_dlpVirtualSlot1 BIT(28)
 #define b_i2cBricked BIT(30)
 #define b_scfgLocked BIT(31)
 
@@ -440,6 +444,10 @@ int hookNdsRetailArm7(
 	if (strncmp(romTid, "HND", 3) == 0) {
 		ce7->valueBits |= b_isDlp;
 	}
+	extern bool dlpReceiverOnFlashcard;
+	if (dlpSessionActive) ce7->valueBits |= b_dlpSession;
+	if (dlpVirtualSlot1Active) ce7->valueBits |= b_dlpVirtualSlot1;
+	if (dlpSessionActive && dlpReceiverOnFlashcard) ce7->valueBits |= b_dlpReceiverOnFlashcard;
 	extern bool i2cBricked;
 	if (i2cBricked) {
 		ce7->valueBits |= b_i2cBricked;

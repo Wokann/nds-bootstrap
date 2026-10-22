@@ -26,7 +26,7 @@
 #include <nds/asminc.h>
 
 	.text
-	.align 4
+	.align 2	@ Word alignment is sufficient for these Thumb SWI wrappers.
 
 	.thumb
 

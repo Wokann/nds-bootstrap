@@ -29,6 +29,7 @@
     project at chishm@hotmail.com
 ------------------------------------------------------------------*/
 
+#include <stddef.h>
 #include "tonccpy.h"
 #include "my_fat.h"
 #include "card.h"
@@ -275,26 +276,44 @@ u32 FAT_ClustToSect (u32 cluster) {
 	return (((cluster-2) * discSecPerClus) + discData);
 }
 
-#ifdef MORECLUSTERBUFFERS
-int FAT_ReadNextClusterCache(u32 sector)
+#endif
+
+#ifdef TWOCARD
+static const u8* FAT_ReadNextClusterCache(u32 sector, const bool boolCard2)
+#else
+static const u8* FAT_ReadNextClusterCache(u32 sector)
+#endif
 {
-	int curSector = 0;
+	#ifdef TWOCARD
+	u8* buffer = nextClusterBuffer[boolCard2];
+	int* previous = &prevNextClust[boolCard2];
+	#else
+	#ifdef MORECLUSTERBUFFERS
 	for (int i = 0; i < nextClusterBufferCount; i++) {
-		if (prevNextClust[i] == sector) {
-			return i;
-		}
+		if (prevNextClust[i] == sector) return nextClusterBuffer[i];
 	}
-
-	curSector = fatAccessCounter;
-	CARD_ReadSector(sector, nextClusterBuffer[curSector], 0, 0);
-	prevNextClust[curSector] = sector;
-	fatAccessCounter++;
-	if (fatAccessCounter == nextClusterBufferCount) fatAccessCounter = 0;
-
-	return curSector;
+	u8* buffer = nextClusterBuffer[fatAccessCounter];
+	int* previous = &prevNextClust[fatAccessCounter];
+	#else
+	u8* buffer = nextClusterBuffer;
+	int* previous = &prevNextClust;
+	#endif
+	#endif
+	if (*previous != sector) {
+		*previous = -1;
+		#ifdef TWOCARD
+		if (!CARD_ReadSector(sector, buffer, 0, 0, boolCard2)) return NULL;
+		#else
+		if (!CARD_ReadSector(sector, buffer, 0, 0)) return NULL;
+		#endif
+		*previous = sector;
+		#if defined(MORECLUSTERBUFFERS) && !defined(TWOCARD)
+		fatAccessCounter++;
+		if (fatAccessCounter == nextClusterBufferCount) fatAccessCounter = 0;
+		#endif
+	}
+	return buffer;
 }
-#endif
-#endif
 
 /*-----------------------------------------------------------------
 FAT_NextCluster
@@ -306,163 +325,52 @@ u32 FAT_NextCluster(u32 cluster, const bool boolCard2)
 u32 FAT_NextCluster(u32 cluster)
 #endif
 {
-	u32 nextCluster = CLUSTER_FREE;
-	u32 sector;
-	int offset;
-#ifdef MORECLUSTERBUFFERS
-	int curSector;
-#endif
-
-
-#ifdef TWOCARD
-	switch (discFileSystem[boolCard2])
-#else
-	switch (discFileSystem)
-#endif
-	{
-		case FS_UNKNOWN:
-			nextCluster = CLUSTER_FREE;
-			break;
-
-		case FS_FAT12:
-			#ifdef TWOCARD
-			sector = discFAT[boolCard2] + (((cluster * 3) / 2) / BYTES_PER_SECTOR);
-			offset = ((cluster * 3) / 2) % BYTES_PER_SECTOR;
-			if (prevNextClust[boolCard2] != sector) {
-				CARD_ReadSector(sector, nextClusterBuffer[boolCard2], 0, 0, boolCard2);
-				prevNextClust[boolCard2] = sector;
-			}
-			nextCluster = ((u8*) nextClusterBuffer[boolCard2])[offset];
-			#else
-			sector = discFAT + (((cluster * 3) / 2) / BYTES_PER_SECTOR);
-			offset = ((cluster * 3) / 2) % BYTES_PER_SECTOR;
-			#ifdef MORECLUSTERBUFFERS
-			curSector = FAT_ReadNextClusterCache(sector);
-			// read the nextCluster value
-			nextCluster = ((u8*) nextClusterBuffer[curSector])[offset];
-			#else
-			if (prevNextClust != sector) {
-				CARD_ReadSector(sector, nextClusterBuffer, 0, 0);
-				prevNextClust = sector;
-			}
-			// read the nextCluster value
-			nextCluster = ((u8*) nextClusterBuffer)[offset];
-			#endif
-			#endif
-			offset++;
-
-			if (offset >= BYTES_PER_SECTOR) {
-				offset = 0;
-				sector++;
-			}
-
-			#ifdef TWOCARD
-			if (prevNextClust[boolCard2] != sector) {
-				CARD_ReadSector(sector, nextClusterBuffer[boolCard2], 0, 0, boolCard2);
-				prevNextClust[boolCard2] = sector;
-			}
-			nextCluster |= (((u8*) nextClusterBuffer[boolCard2])[offset]) << 8;
-			#else
-			#ifdef MORECLUSTERBUFFERS
-			curSector = FAT_ReadNextClusterCache(sector);
-			// read the nextCluster value
-			nextCluster |= (((u8*) nextClusterBuffer[curSector])[offset]) << 8;
-			#else
-			if (prevNextClust != sector) {
-				CARD_ReadSector(sector, nextClusterBuffer, 0, 0);
-				prevNextClust = sector;
-			}
-			// read the nextCluster value
-			nextCluster |= (((u8*) nextClusterBuffer)[offset]) << 8;
-			#endif
-			#endif
-
-			if (cluster & 0x01) {
-				nextCluster = nextCluster >> 4;
-			} else 	{
-				nextCluster &= 0x0FFF;
-			}
-
-			break;
-
-		case FS_FAT16:
-			#ifdef TWOCARD
-			sector = discFAT[boolCard2] + ((cluster << 1) / BYTES_PER_SECTOR);
-			#else
-			sector = discFAT + ((cluster << 1) / BYTES_PER_SECTOR);
-			#endif
-			offset = cluster % (BYTES_PER_SECTOR >> 1);
-
-			#ifdef TWOCARD
-			if (prevNextClust[boolCard2] != sector) {
-				CARD_ReadSector(sector, nextClusterBuffer[boolCard2], 0, 0, boolCard2);
-				prevNextClust[boolCard2] = sector;
-			}
-			// read the nextCluster value
-			nextCluster = ((u16*)nextClusterBuffer[boolCard2])[offset];
-			#else
-			#ifdef MORECLUSTERBUFFERS
-			curSector = FAT_ReadNextClusterCache(sector);
-			// read the nextCluster value
-			nextCluster = ((u16*)nextClusterBuffer[curSector])[offset];
-			#else
-			if (prevNextClust != sector) {
-				CARD_ReadSector(sector, nextClusterBuffer, 0, 0);
-				prevNextClust = sector;
-			}
-			// read the nextCluster value
-			nextCluster = ((u16*)nextClusterBuffer)[offset];
-			#endif
-			#endif
-
-			if (nextCluster >= 0xFFF7)
-			{
-				nextCluster = CLUSTER_EOF;
-			}
-			break;
-
-		case FS_FAT32:
-			#ifdef TWOCARD
-			sector = discFAT[boolCard2] + ((cluster << 2) / BYTES_PER_SECTOR);
-			#else
-			sector = discFAT + ((cluster << 2) / BYTES_PER_SECTOR);
-			#endif
-			offset = cluster % (BYTES_PER_SECTOR >> 2);
-
-			#ifdef TWOCARD
-			if (prevNextClust[boolCard2] != sector) {
-				CARD_ReadSector(sector, nextClusterBuffer[boolCard2], 0, 0, boolCard2);
-				prevNextClust[boolCard2] = sector;
-			}
-			// read the nextCluster value
-			nextCluster = (((u32*)nextClusterBuffer[boolCard2])[offset]) & 0x0FFFFFFF;
-			#else
-			#ifdef MORECLUSTERBUFFERS
-			curSector = FAT_ReadNextClusterCache(sector);
-			// read the nextCluster value
-			nextCluster = (((u32*)nextClusterBuffer[curSector])[offset]) & 0x0FFFFFFF;
-			#else
-			if (prevNextClust != sector) {
-				CARD_ReadSector(sector, nextClusterBuffer, 0, 0);
-				prevNextClust = sector;
-			}
-			// read the nextCluster value
-			nextCluster = (((u32*)nextClusterBuffer)[offset]) & 0x0FFFFFFF;
-			#endif
-			#endif
-
-			if (nextCluster >= 0x0FFFFFF7)
-			{
-				nextCluster = CLUSTER_EOF;
-			}
-			break;
-
-		default:
-			nextCluster = CLUSTER_FREE;
-			break;
+	if (cluster == CLUSTER_FREE || cluster == CLUSTER_EOF) return cluster;
+	#ifdef TWOCARD
+	const int fileSystem = discFileSystem[boolCard2];
+	const u32 fat = discFAT[boolCard2];
+	#else
+	const int fileSystem = discFileSystem;
+	const u32 fat = discFAT;
+	#endif
+	u32 offset;
+	switch (fileSystem) {
+		case FS_FAT12: offset = (cluster * 3) / 2; break;
+		case FS_FAT16: offset = cluster << 1; break;
+		case FS_FAT32: offset = cluster << 2; break;
+		default: return CLUSTER_FREE;
 	}
-
-	return nextCluster;
+	u32 sector = fat + offset / BYTES_PER_SECTOR;
+	offset %= BYTES_PER_SECTOR;
+	#ifdef TWOCARD
+	const u8* buffer = FAT_ReadNextClusterCache(sector, boolCard2);
+	#else
+	const u8* buffer = FAT_ReadNextClusterCache(sector);
+	#endif
+	if (!buffer) return CLUSTER_FREE;
+	u32 nextCluster;
+	switch (fileSystem) {
+		case FS_FAT12:
+			nextCluster = buffer[offset++];
+			if (offset == BYTES_PER_SECTOR) {
+				offset = 0;
+				#ifdef TWOCARD
+				buffer = FAT_ReadNextClusterCache(sector+1, boolCard2);
+				#else
+				buffer = FAT_ReadNextClusterCache(sector+1);
+				#endif
+				if (!buffer) return CLUSTER_FREE;
+			}
+			nextCluster |= buffer[offset] << 8;
+			nextCluster = (cluster & 1) ? nextCluster >> 4 : nextCluster & 0xFFF;
+			return nextCluster >= 0xFF7 ? CLUSTER_EOF : nextCluster;
+		case FS_FAT16:
+			nextCluster = ((const u16*)buffer)[offset >> 1];
+			return nextCluster >= 0xFFF7 ? CLUSTER_EOF : nextCluster;
+		default:
+			nextCluster = ((const u32*)buffer)[offset >> 2] & 0x0FFFFFFF;
+			return nextCluster >= 0x0FFFFFF7 ? CLUSTER_EOF : nextCluster;
+	}
 }
 
 /*-----------------------------------------------------------------
@@ -548,7 +456,7 @@ bool FAT_InitFiles (bool initCard)
 
 	// Read in boot sector
 	bootSec = (BOOT_SEC*) globalBuffer[boolCard2];
-	CARD_ReadSector (bootSector, bootSec, 0, 0, boolCard2);
+	if (!CARD_ReadSector(bootSector, bootSec, 0, 0, boolCard2)) return false;
 
 	// Store required information about the file system
 	if (bootSec->bpb.sectorsPerFAT != 0)
@@ -655,7 +563,7 @@ bool FAT_InitFiles (bool initCard)
 
 	// Read in boot sector
 	bootSec = (BOOT_SEC*) globalBuffer;
-	CARD_ReadSector (bootSector, bootSec, 0, 0);
+	if (!CARD_ReadSector(bootSector, bootSec, 0, 0)) return false;
 
 	// Store required information about the file system
 	if (bootSec->bpb.sectorsPerFAT != 0)
@@ -798,7 +706,7 @@ void getBootFileCluster(aFile* file, const char* bootName)
 				#else
 				wrkDirCluster = FAT_NextCluster(wrkDirCluster);
 				#endif
-				if (wrkDirCluster == CLUSTER_EOF)
+				if (wrkDirCluster == CLUSTER_FREE || wrkDirCluster == CLUSTER_EOF)
 				{
 					notFound = true;
 				}
@@ -936,7 +844,7 @@ static u32 findCluster(aFile* file, u32 startOffset)
         #ifdef DEBUG
         nocashMessage("fatTable not cached");
         #endif
-		if(startOffset<file->currentOffset) {
+		if(startOffset<file->currentOffset || file->currentCluster == CLUSTER_FREE) {
 			file->currentOffset=0;
 			file->currentCluster = file->firstCluster;
 		}
@@ -1248,30 +1156,33 @@ bool resumeFileRead()
 #endif
 
 // Load sector buffer for new position in file
-static inline void loadSectorBuf(aFile* file, int curSect)
+static inline bool loadSectorBuf(aFile* file, int curSect)
 {
 #ifdef TWOCARD
 	const bool fileCard2 = file->fatTableSettings & fatCard2;
 	if (prevFirstClust[fileCard2] != file->firstCluster || prevSect[fileCard2] != curSect || prevClust[fileCard2] != file->currentCluster) {
+		prevSect[fileCard2] = -1;
+		if (!CARD_ReadSectors(curSect + FAT_ClustToSect(file->currentCluster, fileCard2), 1, globalBuffer[fileCard2], fileCard2)) return false;
 		prevFirstClust[fileCard2] = file->firstCluster;
-		CARD_ReadSectors( curSect + FAT_ClustToSect(file->currentCluster, fileCard2), 1, globalBuffer[fileCard2], fileCard2);
 		prevSect[fileCard2] = curSect;
 		prevClust[fileCard2] = file->currentCluster;
 	}
 #else
 	if (prevFirstClust != file->firstCluster || prevSect != curSect || prevClust != file->currentCluster) {
+		prevSect = -1;
+		if (!CARD_ReadSector(curSect + FAT_ClustToSect(file->currentCluster), globalBuffer, 0, 0)) return false;
 		prevFirstClust = file->firstCluster;
-		CARD_ReadSector( curSect + FAT_ClustToSect(file->currentCluster), globalBuffer, 0, 0);
 		prevSect = curSect;
 		prevClust = file->currentCluster;
 	}
 #endif
+	return true;
 }
 
 void resetPrevSect(aFile* file)
 {
 #ifdef TWOCARD
-	prevSect[file->fatTableSettings & fatCard2] = -1;
+	prevSect[!!(file->fatTableSettings & fatCard2)] = -1;
 #else
 	prevSect = -1;
 #endif
@@ -1280,10 +1191,10 @@ void resetPrevSect(aFile* file)
 /*-----------------------------------------------------------------
 fileRead(buffer, cluster, startOffset, length)
 -----------------------------------------------------------------*/
-u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
+static u32 fileReadWrite(char* buffer, aFile* file, u32 startOffset, u32 length, bool write)
 {
 	#ifdef DEBUG
-	nocashMessage("fileRead");
+	nocashMessage("fileReadWrite");
     dbg_hexa(buffer);
     dbg_hexa(startOffset);
     dbg_hexa(length);
@@ -1296,6 +1207,7 @@ u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
 	int beginBytes;
 
     u32 clusterIndex = 0;
+	if (!length) return 0;
 
 	if (file->firstCluster == CLUSTER_FREE || file->firstCluster == CLUSTER_EOF)
 	{
@@ -1322,18 +1234,28 @@ u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
 	#endif
 	curByte = startOffset % BYTES_PER_SECTOR;
 
-	loadSectorBuf(file, curSect);
+	if (!loadSectorBuf(file, curSect)) goto error;
 	curSect++;
 
 	// Number of bytes needed to read to align with a sector
 	beginBytes = (BYTES_PER_SECTOR < length + curByte ? (BYTES_PER_SECTOR - curByte) : length);
 
 	// Read first part from buffer, to align with sector boundary
+	if (write) {
+		#ifdef TWOCARD
+		tonccpy(globalBuffer[fileCard2]+curByte, buffer, beginBytes);
+		if (!CARD_WriteSector(curSect-1 + FAT_ClustToSect(file->currentCluster, fileCard2), globalBuffer[fileCard2], fileCard2)) goto error;
+		#else
+		tonccpy(globalBuffer+curByte, buffer, beginBytes);
+		if (!CARD_WriteSector(curSect-1 + FAT_ClustToSect(file->currentCluster), globalBuffer)) goto error;
+		#endif
+	} else {
 	#ifdef TWOCARD
     tonccpy(buffer,globalBuffer[fileCard2]+curByte,beginBytes);
 	#else
     tonccpy(buffer,globalBuffer+curByte,beginBytes);
 	#endif
+	}
     curByte+=beginBytes;
     dataPos=beginBytes;
 
@@ -1352,11 +1274,9 @@ u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
                   curSect &= (discSecPerClus[fileCard2] - 1);
   				file->currentOffset+=discBytePerClus[fileCard2];
 				file->currentCluster = getCachedCluster(file, clusterIndex);
-				#ifndef SKIPCLUSTERFAILSAFE
-				if (file->currentCluster == CLUSTER_EOF) {
-					return dataPos;
+				if (file->currentCluster == CLUSTER_FREE || file->currentCluster == CLUSTER_EOF) {
+					goto error;
 				}
-				#endif
 			}
 				#else
               if (curSect >= discSecPerClus)
@@ -1365,41 +1285,25 @@ u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
                   curSect &= (discSecPerClus - 1);
   				file->currentOffset+=discBytePerClus;
 				file->currentCluster = getCachedCluster(file, clusterIndex);
-				#ifndef SKIPCLUSTERFAILSAFE
-				if (file->currentCluster == CLUSTER_EOF) {
-					return dataPos;
+				if (file->currentCluster == CLUSTER_FREE || file->currentCluster == CLUSTER_EOF) {
+					goto error;
 				}
-				#endif
   			}
 			  #endif
 
-               // Calculate how many sectors to read (try to group several cluster at a time if there is no fragmentation)
-              for(int tempClusterIndex=clusterIndex; sectorsToRead<=chunks; ) {
-                  if(getCachedCluster(file, tempClusterIndex)+1 == getCachedCluster(file, tempClusterIndex+1)) {
-                      #ifdef DEBUG
-                  	nocashMessage("contiguous read");
-                  	#endif
-                      // the 2 cluster are consecutive
-					#ifdef TWOCARD
-                      sectorsToRead += discSecPerClus[fileCard2];
-					#else
-                      sectorsToRead += discSecPerClus;
-					#endif
-                      tempClusterIndex++;
-                  } else {
-                      #ifdef DEBUG
-                  	nocashMessage("non contiguous read");
-                  	#endif
-                      break;
-                  }
-              }
-
-			  #ifdef TWOCARD
-              if(!sectorsToRead) sectorsToRead = discSecPerClus[fileCard2] - curSect;
-			  #else
-              if(!sectorsToRead) sectorsToRead = discSecPerClus - curSect;
-			  #endif
-              else sectorsToRead -= curSect;
+			#ifdef TWOCARD
+			sectorsToRead = discSecPerClus[fileCard2] - curSect;
+			#else
+			sectorsToRead = discSecPerClus - curSect;
+			#endif
+			for (int tempClusterIndex=clusterIndex; !write && sectorsToRead<chunks; tempClusterIndex++) {
+				if (getCachedCluster(file, tempClusterIndex)+1 != getCachedCluster(file, tempClusterIndex+1)) break;
+				#ifdef TWOCARD
+				sectorsToRead += discSecPerClus[fileCard2];
+				#else
+				sectorsToRead += discSecPerClus;
+				#endif
+			}
 
               if(chunks < sectorsToRead) {
 			    sectorsToRead = chunks;
@@ -1417,9 +1321,9 @@ u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
 
               // Read the sectors
 			  #ifdef TWOCARD
-    			CARD_ReadSectors(curSect + FAT_ClustToSect(file->currentCluster, fileCard2), sectorsToRead, buffer + dataPos, fileCard2);
+				if (!(write ? CARD_WriteSectors(curSect + FAT_ClustToSect(file->currentCluster, fileCard2), sectorsToRead, buffer + dataPos, fileCard2) : CARD_ReadSectors(curSect + FAT_ClustToSect(file->currentCluster, fileCard2), sectorsToRead, buffer + dataPos, fileCard2))) goto error;
 			  #else
-    			CARD_ReadSectors(curSect + FAT_ClustToSect(file->currentCluster), sectorsToRead, buffer + dataPos);
+				if (!(write ? CARD_WriteSectors(curSect + FAT_ClustToSect(file->currentCluster), sectorsToRead, buffer + dataPos) : CARD_ReadSectors(curSect + FAT_ClustToSect(file->currentCluster), sectorsToRead, buffer + dataPos))) goto error;
 			  #endif
     			chunks  -= sectorsToRead;
     			curSect += sectorsToRead;
@@ -1442,12 +1346,10 @@ u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
               clusterIndex+= curSect >> discSecPerClusShift;
               curSect &= (discSecPerClus - 1);
               #endif
-				file->currentCluster = getCachedCluster(file, clusterIndex);
-				#ifndef SKIPCLUSTERFAILSAFE
-				if (file->currentCluster == CLUSTER_EOF) {
-					return dataPos;
+				if (dataPos < length) {
+					file->currentCluster = getCachedCluster(file, clusterIndex);
+					if (file->currentCluster == CLUSTER_FREE || file->currentCluster == CLUSTER_EOF) goto error;
 				}
-				#endif
           } else {
               // Move to the next cluster if necessary
 			#ifdef TWOCARD
@@ -1455,11 +1357,9 @@ u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
   			{
   				curSect = 0;
                   file->currentCluster = FAT_NextCluster (file->currentCluster, fileCard2);
-				#ifndef SKIPCLUSTERFAILSAFE
-				if (file->currentCluster == CLUSTER_EOF) {
-					return dataPos;
+				if (file->currentCluster == CLUSTER_FREE || file->currentCluster == CLUSTER_EOF) {
+					goto error;
 				}
-				#endif
   				file->currentOffset+=discBytePerClus[fileCard2];
   			}
 			#else
@@ -1467,11 +1367,9 @@ u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
   			{
   				curSect = 0;
                   file->currentCluster = FAT_NextCluster (file->currentCluster);
-				#ifndef SKIPCLUSTERFAILSAFE
-				if (file->currentCluster == CLUSTER_EOF) {
-					return dataPos;
+				if (file->currentCluster == CLUSTER_FREE || file->currentCluster == CLUSTER_EOF) {
+					goto error;
 				}
-				#endif
   				file->currentOffset+=discBytePerClus;
   			}
 			#endif
@@ -1483,14 +1381,14 @@ u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
 			sectorsToRead = chunks;
 
               // Read the sectors
-  			CARD_ReadSectors(curSect + FAT_ClustToSect(file->currentCluster, fileCard2), sectorsToRead, buffer + dataPos, fileCard2);
+			if (!(write ? CARD_WriteSectors(curSect + FAT_ClustToSect(file->currentCluster, fileCard2), sectorsToRead, buffer + dataPos, fileCard2) : CARD_ReadSectors(curSect + FAT_ClustToSect(file->currentCluster, fileCard2), sectorsToRead, buffer + dataPos, fileCard2))) goto error;
 			#else
 		    sectorsToRead = discSecPerClus - curSect;
 		    if(chunks < sectorsToRead)
 			sectorsToRead = chunks;
 
               // Read the sectors
-  			CARD_ReadSectors(curSect + FAT_ClustToSect(file->currentCluster), sectorsToRead, buffer + dataPos);
+			if (!(write ? CARD_WriteSectors(curSect + FAT_ClustToSect(file->currentCluster), sectorsToRead, buffer + dataPos) : CARD_ReadSectors(curSect + FAT_ClustToSect(file->currentCluster), sectorsToRead, buffer + dataPos))) goto error;
 			#endif
   			chunks  -= sectorsToRead;
   			curSect += sectorsToRead;
@@ -1520,11 +1418,9 @@ u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
                   curSect = 0;
                   file->currentCluster = FAT_NextCluster (file->currentCluster, fileCard2);
               }
-			#ifndef SKIPCLUSTERFAILSAFE
-			if (file->currentCluster == CLUSTER_EOF) {
-				return dataPos;
+			if (file->currentCluster == CLUSTER_FREE || file->currentCluster == CLUSTER_EOF) {
+				goto error;
 			}
-			#endif
 			file->currentOffset+=discBytePerClus[fileCard2];
 		}
 		#else
@@ -1538,11 +1434,9 @@ u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
                   curSect = 0;
                   file->currentCluster = FAT_NextCluster (file->currentCluster);
               }
-			#ifndef SKIPCLUSTERFAILSAFE
-			if (file->currentCluster == CLUSTER_EOF) {
-				return dataPos;
+			if (file->currentCluster == CLUSTER_FREE || file->currentCluster == CLUSTER_EOF) {
+				goto error;
 			}
-			#endif
 			file->currentOffset+=discBytePerClus;
 		}
 		#endif
@@ -1557,16 +1451,26 @@ u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
 		  #endif
           #endif
 
-		loadSectorBuf(file, curSect);
+		if (!loadSectorBuf(file, curSect)) goto error;
 
 		// Read in last partial chunk
+		if (write) {
+			#ifdef TWOCARD
+			tonccpy(globalBuffer[fileCard2], buffer+dataPos, length-dataPos);
+			if (!CARD_WriteSector(curSect + FAT_ClustToSect(file->currentCluster, fileCard2), globalBuffer[fileCard2], fileCard2)) goto error;
+			#else
+			tonccpy(globalBuffer, buffer+dataPos, length-dataPos);
+			if (!CARD_WriteSector(curSect + FAT_ClustToSect(file->currentCluster), globalBuffer)) goto error;
+			#endif
+		} else {
 		  #ifdef TWOCARD
           tonccpy(buffer+dataPos,globalBuffer[fileCard2],length-dataPos);
 		  #else
           tonccpy(buffer+dataPos,globalBuffer,length-dataPos);
 		  #endif
-          curByte+=length;
-          dataPos+=length;
+		}
+          curByte+=length-dataPos;
+          dataPos=length;
 	}
 
       #ifdef DEBUG
@@ -1576,201 +1480,25 @@ u32 fileRead (char* buffer, aFile* file, u32 startOffset, u32 length)
 
 	return dataPos;
 
+error:
+	resetPrevSect(file);
+	return dataPos;
 }
 
-/*-----------------------------------------------------------------
-fileWrite(buffer, cluster, startOffset, length)
------------------------------------------------------------------*/
-u32 fileWrite (const char* buffer, aFile* file, u32 startOffset, u32 length)
+u32 fileRead(char* buffer, aFile* file, u32 startOffset, u32 length)
 {
-	#ifdef DEBUG
-	nocashMessage("fileWrite");
-	#endif
+	return fileReadWrite(buffer, file, startOffset, length, false);
+}
 
-	int curByte;
-	int curSect;
-
-	int dataPos = 0;
-	int beginBytes;
-    u32 clusterIndex = 0;
-
-	if (file->firstCluster == CLUSTER_FREE || file->firstCluster == CLUSTER_EOF)
-	{
-		#ifdef DEBUG
-		nocashMessage("CLUSTER_FREE or CLUSTER_EOF");
-		#endif
-		return 0;
-	}
-
-	if ((file->fatTableSettings & fatCached) && (file->fatTableCache[0] == CLUSTER_FREE || file->fatTableCache[0] == CLUSTER_EOF)) {
-		// Cluster in FAT table cache is invalid
-		return 0;
-	}
-
-	clusterIndex = findCluster(file, startOffset);
-	if (file->currentCluster == CLUSTER_FREE || file->currentCluster == CLUSTER_EOF) {
-		return 0;
-	}
-
-	// Calculate the sector and byte of the current position,
-	// and store them
-	#ifdef TWOCARD
-	const bool fileCard2 = file->fatTableSettings & fatCard2;
-	curSect = (startOffset & (discBytePerClus[fileCard2] - 1)) / BYTES_PER_SECTOR;
-	#else
-	curSect = (startOffset & (discBytePerClus - 1)) / BYTES_PER_SECTOR;
-	#endif
-	curByte = startOffset % BYTES_PER_SECTOR;
-
-	loadSectorBuf(file, curSect);
-
-	// Number of bytes needed to read to align with a sector
-	beginBytes = (BYTES_PER_SECTOR < length + curByte ? (BYTES_PER_SECTOR - curByte) : length);
-
-	// Read first part from buffer, to align with sector boundary
-	#ifdef TWOCARD
-    tonccpy(globalBuffer[fileCard2]+curByte,buffer,beginBytes);
-	#else
-    tonccpy(globalBuffer+curByte,buffer,beginBytes);
-	#endif
-    curByte+=beginBytes;
-    dataPos=beginBytes;
-
-	#ifdef TWOCARD
-	CARD_WriteSector(curSect + FAT_ClustToSect(file->currentCluster, fileCard2), globalBuffer[fileCard2], fileCard2);
-	#else
-	CARD_WriteSector(curSect + FAT_ClustToSect(file->currentCluster), globalBuffer);
-	#endif
-
-	curSect++;
-
-	// Read in all the 512 byte chunks of the file directly, saving time
-	for (int chunks = ((int)length - beginBytes) / BYTES_PER_SECTOR; chunks > 0;)
-	{
-		int sectorsToWrite;
-
-		// Move to the next cluster if necessary
-		#ifdef TWOCARD
-		if (curSect >= discSecPerClus[fileCard2])
-		{
-            if(file->fatTableSettings & fatCached) {
-                clusterIndex++;
-                file->currentCluster = getCachedCluster(file, clusterIndex);
-            } else {
-                file->currentCluster = FAT_NextCluster (file->currentCluster, fileCard2);
-            }
-			#ifndef SKIPCLUSTERFAILSAFE
-			if (file->currentCluster == CLUSTER_EOF) {
-				return dataPos;
-			}
-			#endif
-            file->currentOffset+=discBytePerClus[fileCard2];
-			curSect = 0;
-		}
-		#else
-		if (curSect >= discSecPerClus)
-		{
-            if(file->fatTableSettings & fatCached) {
-                clusterIndex++;
-                file->currentCluster = getCachedCluster(file, clusterIndex);
-            } else {
-                file->currentCluster = FAT_NextCluster (file->currentCluster);
-            }
-			#ifndef SKIPCLUSTERFAILSAFE
-			if (file->currentCluster == CLUSTER_EOF) {
-				return dataPos;
-			}
-			#endif
-            file->currentOffset+=discBytePerClus;
-			curSect = 0;
-		}
-		#endif
-
-		// Calculate how many sectors to read (read a maximum of discSecPerClus at a time)
-		#ifdef TWOCARD
-		sectorsToWrite = discSecPerClus[fileCard2] - curSect;
-		#else
-		sectorsToWrite = discSecPerClus - curSect;
-		#endif
-		if(chunks < sectorsToWrite)
-			sectorsToWrite = chunks;
-
-		// Read the sectors
-		#ifdef TWOCARD
-		CARD_WriteSectors(curSect + FAT_ClustToSect(file->currentCluster, fileCard2), sectorsToWrite, buffer + dataPos, fileCard2);
-		#else
-		CARD_WriteSectors(curSect + FAT_ClustToSect(file->currentCluster), sectorsToWrite, buffer + dataPos);
-		#endif
-
-		chunks  -= sectorsToWrite;
-		curSect += sectorsToWrite;
-		dataPos += BYTES_PER_SECTOR * sectorsToWrite;
-	}
-
-	// Take care of any bytes left over before end of read
-	if (dataPos < length)
-	{
-		// Update the read buffer
-		curByte = 0;
-		#ifdef TWOCARD
-		if (curSect >= discSecPerClus[fileCard2])
-		{
-            if(file->fatTableSettings & fatCached) {
-                clusterIndex++;
-                file->currentCluster = getCachedCluster(file, clusterIndex);
-            } else {
-                file->currentCluster = FAT_NextCluster (file->currentCluster, fileCard2);
-            }
-			#ifndef SKIPCLUSTERFAILSAFE
-			if (file->currentCluster == CLUSTER_EOF) {
-				return dataPos;
-			}
-			#endif
-			curSect = 0;
-			file->currentOffset+=discBytePerClus[fileCard2];
-		}
-		#else
-		if (curSect >= discSecPerClus)
-		{
-            if(file->fatTableSettings & fatCached) {
-                clusterIndex++;
-                file->currentCluster = getCachedCluster(file, clusterIndex);
-            } else {
-                file->currentCluster = FAT_NextCluster (file->currentCluster);
-            }
-			#ifndef SKIPCLUSTERFAILSAFE
-			if (file->currentCluster == CLUSTER_EOF) {
-				return dataPos;
-			}
-			#endif
-			curSect = 0;
-			file->currentOffset+=discBytePerClus;
-		}
-		#endif
-		loadSectorBuf(file, curSect);
-
-		// Read in last partial chunk
-		#ifdef TWOCARD
-        tonccpy(globalBuffer[fileCard2]+curByte,buffer+dataPos,length-dataPos);
-		#else
-        tonccpy(globalBuffer+curByte,buffer+dataPos,length-dataPos);
-		#endif
-        curByte+=length;
-        dataPos+=length;
-
-		#ifdef TWOCARD
-		CARD_WriteSector( curSect + FAT_ClustToSect(file->currentCluster, fileCard2), globalBuffer[fileCard2], fileCard2);
-		#else
-		CARD_WriteSector( curSect + FAT_ClustToSect(file->currentCluster), globalBuffer);
-		#endif
-	}
-
-	return dataPos;
+u32 fileWrite(const char* buffer, aFile* file, u32 startOffset, u32 length)
+{
+	return fileReadWrite((char*)buffer, file, startOffset, length, true);
 }
 
 void buildFatTableCache (aFile * file)
 {
 	if (file->fatTableSettings & fatCached) return;
+	file->fatTableCacheSize = 0;
 
     #ifdef DEBUG
 	nocashMessage("buildFatTableCache");
@@ -1781,10 +1509,10 @@ void buildFatTableCache (aFile * file)
 
 	file->fatTableCache = lastClusterCacheUsed;
 
-	const u32* lastClusterCacheUsedBak = lastClusterCacheUsed;
+	u32* const lastClusterCacheUsedBak = lastClusterCacheUsed;
 
 	// Follow cluster list until desired one is found
-	while (file->firstCluster != CLUSTER_FREE && (u32)lastClusterCacheUsed<clusterCache+clusterCacheSize)
+	while (file->currentCluster != CLUSTER_FREE && (u32)lastClusterCacheUsed+sizeof(u32)<=clusterCache+clusterCacheSize)
 	{
 		bool exit = false;
 		*lastClusterCacheUsed = file->currentCluster;
@@ -1816,13 +1544,16 @@ void buildFatTableCache (aFile * file)
         #endif
 		file->fatTableSettings |= fatCached;
 	}
-    #ifdef DEBUG
-    else {
-      nocashMessage("fat table not cached");
-	  file->fatTableCacheSize = 0;
-	  lastClusterCacheUsed = lastClusterCacheUsedBak;
-    }
-    #endif
+	else {
+		#ifdef DEBUG
+		nocashMessage("fat table not cached");
+		#endif
+		#ifndef B4DS
+		currentClusterCacheSize -= file->fatTableCacheSize;
+		#endif
+		file->fatTableCacheSize = 0;
+		lastClusterCacheUsed = lastClusterCacheUsedBak;
+	}
 
 	file->currentOffset=0;
 	file->currentCluster = file->firstCluster;
@@ -1832,6 +1563,7 @@ void buildFatTableCache (aFile * file)
 void buildFatTableCacheCompressed (aFile * file)
 {
 	if (file->fatTableSettings & fatCached) return;
+	file->fatTableCacheSize = 0;
 
     #ifdef DEBUG
 	nocashMessage("buildFatTableCacheCompressed");
@@ -1842,17 +1574,17 @@ void buildFatTableCacheCompressed (aFile * file)
 
 	file->fatTableCache = lastClusterCacheUsed;
 
-	const u32* lastClusterCacheUsedBak = lastClusterCacheUsed;
+	u32* const lastClusterCacheUsedBak = lastClusterCacheUsed;
 
 	// Follow cluster list until desired one is found
-	while (file->currentCluster != CLUSTER_EOF && file->firstCluster != CLUSTER_FREE
-		&& (u32)lastClusterCacheUsed<clusterCache+clusterCacheSize)
+	while (file->currentCluster != CLUSTER_EOF && file->currentCluster != CLUSTER_FREE
+		&& (u32)lastClusterCacheUsed+2*sizeof(u32)<=clusterCache+clusterCacheSize)
 	{
 		u32 clusterNext = file->currentCluster;
 		int clusterCount = 1; // Adjacent cluster count
 
 		*lastClusterCacheUsed = file->currentCluster;
-		while (file->currentCluster != CLUSTER_EOF && file->firstCluster != CLUSTER_FREE) {
+		while (file->currentCluster != CLUSTER_EOF && file->currentCluster != CLUSTER_FREE) {
 			#ifdef TWOCARD
 			const bool fileCard2 = file->fatTableSettings & fatCard2;
 			file->currentOffset+=discBytePerClus[fileCard2];
@@ -1889,13 +1621,16 @@ void buildFatTableCacheCompressed (aFile * file)
 		file->fatTableSettings |= fatCached;
 		file->fatTableSettings |= fatCompressed;
 	}
-    #ifdef DEBUG
-    else {
-      nocashMessage("fat table not cached and compressed");
-	  file->fatTableCacheSize = 0;
-	  lastClusterCacheUsed = lastClusterCacheUsedBak;
-    }
-    #endif
+	else {
+		#ifdef DEBUG
+		nocashMessage("fat table not cached and compressed");
+		#endif
+		#ifndef B4DS
+		currentClusterCacheSize -= file->fatTableCacheSize;
+		#endif
+		file->fatTableCacheSize = 0;
+		lastClusterCacheUsed = lastClusterCacheUsedBak;
+	}
 
 	file->currentOffset=0;
 	file->currentCluster = file->firstCluster;

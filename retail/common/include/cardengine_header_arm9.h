@@ -112,6 +112,8 @@ typedef struct cardengineArm9 {
 		20: resetOnEveryException
 		21: useColorLut
 		22: colorLutBlockVCount
+		23: dlpSession (invalidate caches across downloaded programs)
+		24: dlpVirtualSlot1Empty
 	*/
 	s32 mainScreen;
 	u32 consoleModel;
@@ -239,6 +241,8 @@ typedef struct cardengineArm9 {
 		8: cardReadFix
 		9: bypassExceptionHandler
 		10: clearRamOnReset
+		23: dlpSession
+		24: dlpVirtualSlot1Empty
 	*/
     s32 mainScreen;
 	u32* irqTable;

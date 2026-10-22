@@ -19,6 +19,9 @@ __irq_flagsaux	=	__vram_top - 0x40; /*__irq_flagsaux	=	0x04000000 - 0x40;*/
 __irq_vector	=	__vram_top - 4;
 
 
+/* Reserve stack space for the ARM7 loader and its callees. */
+ASSERT(__bss_end <= __sp_usr - 0x2000, "ARM7 loader needs 8 KiB of stack")
+
 __arm9ram_start	=	ORIGIN(arm9ram);
 __arm9ram_top	=	ORIGIN(arm9ram)+ LENGTH(arm9ram);
 __arm9_sp_irq	=	__arm9ram_top - 0x60;
