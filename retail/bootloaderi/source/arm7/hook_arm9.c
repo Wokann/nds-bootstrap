@@ -311,7 +311,6 @@ int hookNdsRetailArm9(
 	ce9->mobiclipEndOffset      = mobiclipEndOffset;
 
 	if (!ROMinRAM) {
-		//extern bool gbaRomFound;
 		extern bool ce9DldiBinary;
 		bool runOverlayCheck = overlayPatch;
 		ce9->cacheBlockSize = cacheBlockSize;

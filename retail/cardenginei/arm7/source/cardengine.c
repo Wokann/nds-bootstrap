@@ -35,6 +35,7 @@
 #include "tonccpy.h"
 #include "my_sdmmc.h"
 #include "my_fat.h"
+#include "virtual_slot2.h"
 #include "locations.h"
 #include "module_params.h"
 #include "unpatched_funcs.h"
@@ -150,19 +151,16 @@ static int wifiIrqTimer = 0;
 #ifdef TWLSDK
 static aFile* romFile = (aFile*)ROM_FILE_LOCATION_TWLSDK;
 static aFile* savFile = (aFile*)SAV_FILE_LOCATION_TWLSDK;
-//static aFile* gbaFile = (aFile*)GBA_FILE_LOCATION_TWLSDK;
 static aFile* apFixOverlaysFile = (aFile*)OVL_FILE_LOCATION_TWLSDK;
 static aFile* sharedFontFile = (aFile*)FONT_FILE_LOCATION_TWLSDK;
 #else
 #ifdef ALTERNATIVE
 static aFile* romFile = (aFile*)ROM_FILE_LOCATION_ALT;
 static aFile* savFile = (aFile*)SAV_FILE_LOCATION_ALT;
-//static aFile* gbaFile = (aFile*)GBA_FILE_LOCATION_ALT;
 static aFile* apFixOverlaysFile = (aFile*)OVL_FILE_LOCATION_ALT;
 #else
 static aFile* romFile = (aFile*)ROM_FILE_LOCATION;
 static aFile* savFile = (aFile*)SAV_FILE_LOCATION;
-//static aFile* gbaFile = (aFile*)GBA_FILE_LOCATION;
 static aFile* apFixOverlaysFile = (aFile*)OVL_FILE_LOCATION;
 #endif
 #endif
@@ -1382,33 +1380,6 @@ static void sharedFontRead(void) {
 }
 #endif
 
-/*static void slot2Read(void) {
-	u32 src = *(vu32*)(sharedAddr+2);
-	u32 dst = *(vu32*)(sharedAddr);
-	u32 len = *(vu32*)(sharedAddr+1);
-	#ifdef DEBUG
-	u32 marker = *(vu32*)(sharedAddr+3);
-
-	dbg_printf("\nslot2 read received\n");
-
-	if (calledViaIPC) {
-		dbg_printf("\ntriggered via IPC\n");
-	}
-	dbg_printf("\nsrc : \n");
-	dbg_hexa(src);
-	dbg_printf("\ndst : \n");
-	dbg_hexa(dst);
-	dbg_printf("\nlen : \n");
-	dbg_hexa(len);
-	dbg_printf("\nmarker : \n");
-	dbg_hexa(marker);
-	#endif
-
-	cardReadLED(true);    // When a file is loading, turn on LED for card read indicator
-	fileRead((char*)dst, *gbaFile, src, len, -1);
-	cardReadLED(false);
-}*/
-
 static bool readOngoing = false;
 //static bool sdReadOngoing = false;
 //static bool ongoingIsDma = false;
@@ -1655,7 +1626,29 @@ static inline void sdmmcHandler(void) { // Unused
 }
 #endif
 
+#ifdef VIRTUAL_SLOT2
+static bool runVirtualSlot2Request(void) {
+	if (sharedAddr[3] != SLOT2_IPC_COMMAND) return false;
+	if (!tryLockMutex(&saveMutex)) return true;
+	initialize();
+	driveInitialize();
+	const uint32_t address = sharedAddr[0];
+	int result = 0;
+	if (address >= 0x02000000 && address <= 0x02800000 - sizeof(VirtualSlot2Request)) {
+		const VirtualSlot2Request *r = (const VirtualSlot2Request *)address;
+		result = virtualSlot2FileIO(&r->config, r->operation, r->offset, (void *)r->buffer, r->length);
+	}
+	sharedAddr[4] = result;
+	sharedAddr[3] = 0;
+	unlockMutex(&saveMutex);
+	return true;
+}
+#endif
+
 void runCardEngineCheck(void) {
+	#ifdef VIRTUAL_SLOT2
+	if (runVirtualSlot2Request()) return;
+	#endif
 	// if (!(valueBits & b_runCardEngineCheck)) return;
 
 	//dbg_printf("runCardEngineCheck\n");
@@ -1700,18 +1693,15 @@ void runCardEngineCheck(void) {
     			sharedAddr[3] = 0;
 			} */
 
-            /*if (sharedAddr[3] == (vu32)0x025FBC01) {
-                dmaLed = false;
-    			slot2Read();
-    			sharedAddr[3] = 0;
-    			IPC_SendSync(0x8);
-    		}*/
         //}
   		// unlockMutex(&cardEgnineCommandMutex);
   	// }
 }
 
 void runCardEngineCheckHalt(void) {
+	#ifdef VIRTUAL_SLOT2
+	if (runVirtualSlot2Request()) return;
+	#endif
 	//dbg_printf("runCardEngineCheckHalt\n");
 	#ifdef DEBUG		
 	nocashMessage("runCardEngineCheckHalt");
@@ -1778,12 +1768,6 @@ void runCardEngineCheckHalt(void) {
 			}
 			#endif
 
-            /*if (sharedAddr[3] == (vu32)0x025FBC01) {
-                dmaLed = false;
-    			slot2Read();
-    			sharedAddr[3] = 0;
-    			IPC_SendSync(0x8);
-    		}*/
         //}
   		// unlockMutex(&cardEgnineCommandMutex);
   	// }

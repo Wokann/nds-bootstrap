@@ -3,6 +3,8 @@
 #include "nds_header.h"
 #include "module_params.h"
 #include "patch.h"
+#include "load_crt0.h"
+#include "virtual_slot2.h"
 #include "find.h"
 #include "common.h"
 #include "value_bits.h"
@@ -854,8 +856,11 @@ u32 patchCardNdsArm7(
 		// saveRelocation: option value write in nds-bootstrap.ini (default value is 1)
 		// GameCodeMatch: Compare gamecodes between DS Cartridge and Rom on SD
 		// This file can active save located into DS Cartridge for dsi/3ds mode.
+		const bool virtualSlot2OnFlashcard = virtualSlot2Magic == SLOT2_MAGIC
+			&& (virtualSlot2Flags & SLOT2_ENABLED)
+			&& (virtualSlot2Flags & (SLOT2_ROM_ON_FLASHCARD | SLOT2_SAVE_ON_FLASHCARD));
 		bool GameCodeMatch = false;
-		if (!gameOnFlashcard && !saveOnFlashcard && REG_SCFG_EXT != 0 && !(REG_SCFG_MC & BIT(0))) {
+		if (!gameOnFlashcard && !saveOnFlashcard && !virtualSlot2OnFlashcard && REG_SCFG_EXT != 0 && !(REG_SCFG_MC & BIT(0))) {
 			char headerData[0x200] = {0};
 			cardParamCommand (CARD_CMD_HEADER_READ, 0, 
 				CARD_ACTIVATE | CARD_nRESET | CARD_CLK_SLOW | CARD_BLK_SIZE(1) | CARD_DELAY1(0x1FFF) | CARD_DELAY2(0x3F), 

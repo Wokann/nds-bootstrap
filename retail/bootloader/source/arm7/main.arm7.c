@@ -1409,7 +1409,9 @@ int arm7_main(void) {
 	ce9Location = *(u32*)CARDENGINE_ARM9_LOCATION_BUFFERED;
 	ce9Alt = (ce9Location == CARDENGINE_ARM9_LOCATION_DLDI_ALT || ce9Location == CARDENGINE_ARM9_LOCATION_DLDI_ALT2);
 	// const bool ce9NotInHeap = (ce9Alt || ce9Location == CARDENGINE_ARM9_LOCATION_DLDI_START);
-	tonccpy((u32*)ce9Location, (u32*)CARDENGINE_ARM9_LOCATION_BUFFERED, ce9Alt ? 0x2800 : 0x3800);
+	tonccpy((u32*)ce9Location, (u32*)CARDENGINE_ARM9_LOCATION_BUFFERED,
+		(ce9Location == CARDENGINE_ARM9_LOCATION_DLDI || ce9Location == CARDENGINE_ARM9_LOCATION_DLDI_32)
+		? 0x4800 : ce9Alt ? 0x2800 : 0x3800);
 	toncset((u32*)0x023E0000, 0, 0x10000);
 
 	aFile musicsFile;
@@ -1665,7 +1667,9 @@ int arm7_main(void) {
 	)) {
 		ce9DldiItcm = 0x01FFC000; // Set <= 16KB DLDI location at ITCM
 	}
-	if (!dldiPatchBinary((data_t*)ce9Location, 0x3800, (data_t*)ce9DldiOffset, (data_t*)ce9DldiItcm)) {
+	if (!dldiPatchBinary((data_t*)ce9Location,
+		(ce9Location == CARDENGINE_ARM9_LOCATION_DLDI || ce9Location == CARDENGINE_ARM9_LOCATION_DLDI_32) ? 0x4800 : 0x3800,
+		(data_t*)ce9DldiOffset, (data_t*)ce9DldiItcm)) {
 		dbg_printf("ce9 DLDI patch failed\n");
 		errorOutput();
 	}

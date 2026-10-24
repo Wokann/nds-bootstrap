@@ -189,7 +189,11 @@ patches:
 #endif
 .word	cardStructArm9
 .word   waitSysCycles
-.word	cart_read
+#ifdef VIRTUAL_SLOT2
+.word   virtualSlot2Patches
+#else
+.word   0
+#endif
 .word   cacheFlushRef
 .word   0x0 @cardEndReadDmaRef
 .word   0x0 @sleepRef
@@ -223,7 +227,7 @@ thumbPatches:
 .word   thumb_nand_write_arm9
 .word	cardStructArm9
 .word   thumb_card_pull
-.word	thumb_cart_read
+.word   0x0
 .word   cacheFlushRef
 thumbCardEndReadDmaRef:
 .word   0x0 @cardEndReadDmaRef
@@ -292,7 +296,6 @@ card_set_dma_arm9:
 
 @---------------------------------------------------------------------------------
 card_pull_out_arm9:
-cart_read:
 @---------------------------------------------------------------------------------
 	bx      lr
 @	stmfd   sp!, {lr}
@@ -327,19 +330,6 @@ waitSysCycles:
 	BL              waitCpuCycles
 	LDMFD           SP!, {R3,PC}
 
-@---------------------------------------------------------------------------------
-@cart_read:
-@---------------------------------------------------------------------------------
-@	stmfd   sp!, {r4-r7,lr}
-
-@	ldr		r6, =cartRead
-
-@	bl		_blx_r6_stub_cart_read
-
-@	ldmfd   sp!, {r4-r7,pc}
-_blx_r6_stub_cart_read:
-@	bx	r6
-@.pool
 	.thumb
 @---------------------------------------------------------------------------------
 thumb_card_id_arm9:
@@ -608,27 +598,10 @@ gsdd_fix2: .word gsdd_fix2+4
 @---------------------------------------------------------------------------------
 thumb_card_pull_out_arm9:
 thumb_card_pull:
-thumb_cart_read:
 @---------------------------------------------------------------------------------
 	bx      lr
 @---------------------------------------------------------------------------------
 
-@---------------------------------------------------------------------------------
-@thumb_cart_read:
-@---------------------------------------------------------------------------------
-@	push	{r4-r7, lr}
-
-@	ldr		r6, =cartRead
-
-@	bl		_blx_r6_stub_thumb_slot2_read
-
-@	POP		{r4-r7}
-@	POP		{r3}
-@	bx      r3
-_blx_r6_stub_thumb_slot2_read:
-@	bx	r6
-@.pool
-@.align	4
 	.arm
 
 vcountHandler:

@@ -37,12 +37,12 @@
 	.global donorFileCluster
 	.global donorFileSize
 	.global donorFileOffset
-	@ .global gbaFileCluster
-	@ .global gbaSaveFileCluster
+	.global virtualSlot2RomCluster
+	.global virtualSlot2SaveCluster
 	.global romSize
 	.global saveSize
-	@ .global gbaRomSize
-	@ .global gbaSaveSize
+	.global virtualSlot2RomSize
+	.global virtualSlot2SaveSize
 	.global quitFileCluster
 	.global dataToPreloadAddr
 	.global dataToPreloadSize
@@ -92,6 +92,10 @@
 	.global cacheBlockSize
 	.global bannerSavPath
 	.global version
+	.global virtualSlot2Magic
+	.global virtualSlot2Flags
+	.global virtualSlot2SaveType
+	.global virtualSlot2Header
 @---------------------------------------------------------------------------------
 	.align	4
 	.arm
@@ -130,18 +134,18 @@ donorFileSize:
 	.word	0x00000000		@ SDK5 donor .nds file size
 donorFileOffset:
 	.word	0x00000000		@ SDK5 donor .nds file offset
-@gbaFileCluster:
-@	.word	0x00000000		@ .gba file
-@gbaSaveFileCluster:
-@	.word	0x00000000		@ .GBA .sav file
+virtualSlot2RomCluster:
+	.word	0x00000000
+virtualSlot2SaveCluster:
+	.word	0x00000000
 romSize:
 	.word	0x00000000		@ .nds file size
 saveSize:
 	.word	0x00000000		@ .sav file size
-@gbaRomSize:
-@	.word	0x00000000		@ .gba file size
-@gbaSaveSize:
-@	.word	0x00000000		@ GBA .sav file size
+virtualSlot2RomSize:
+	.word	0x00000000
+virtualSlot2SaveSize:
+	.word	0x00000000
 quitFileCluster:
 	.word	0x00000000
 dataToPreloadAddr:
@@ -259,6 +263,15 @@ bannerSavPath:
 	.space	64
 version:
 	.space	20
+	.align	2
+virtualSlot2Magic:
+	.word	0x00000000
+virtualSlot2Flags:
+	.word	0x00000000
+virtualSlot2SaveType:
+	.word	0x00000000
+virtualSlot2Header:
+	.space	192
 .align 4
 
 startUp:

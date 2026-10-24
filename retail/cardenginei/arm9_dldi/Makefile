@@ -39,10 +39,10 @@ CFLAGS	:=	-g -Wall -O2\
 			$(ARCH)
 
 # ADD -DDEBUG here for logging/debug
-CFLAGS	+=	$(INCLUDE) -DARM9 -DDLDI -D_NO_SDMMC -DNO_CARDID
+CFLAGS	+=	$(INCLUDE) -DVIRTUAL_SLOT2 -DARM9 -DDLDI -D_NO_SDMMC -DNO_CARDID
 CXXFLAGS	:=	$(CFLAGS) -fno-rtti -fno-exceptions
 
-ASFLAGS	:=	-g $(ARCH) $(INCLUDE)
+ASFLAGS	:=	-g $(ARCH) $(INCLUDE) -DVIRTUAL_SLOT2
 
 LDFLAGS	=	-nostartfiles -T cardengine.ld -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 

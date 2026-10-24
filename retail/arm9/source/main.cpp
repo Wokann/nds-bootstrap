@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string>
 #include <string.h>
@@ -195,7 +196,7 @@ static inline void debugConf(configuration* conf) {
 		dopause();
 	}
 	dbg_printf("prvPath: \"%s\"\n", conf->prvPath);
-	//dbg_printf("gbaPath: \"%s\"\n", conf->gbaPath);
+	//dbg_printf("virtualSlot2RomPath: \"%s\"\n", conf->virtualSlot2RomPath);
 	if (isDSiMode() && REG_SCFG_EXT7 == 0) {
 		if (*(u32*)0x02FFE1A0 == 0x00403000) {
 			dbg_printf("donorTwlPath: \"%s\"\n", conf->donorTwlPath);
@@ -434,8 +435,8 @@ static int runNdsFile(configuration* conf) {
 	struct stat stDonor0;
 	struct stat stDonor5;
 	struct stat stDonor5Alt;
-	// struct stat stGba;
-	// struct stat stGbaSav;
+	struct stat stVirtualSlot2Rom;
+	struct stat stVirtualSlot2Save;
 	struct stat stQuit;
 	struct stat stWideCheat;
 	struct stat stApPatch;
@@ -453,8 +454,8 @@ static int runNdsFile(configuration* conf) {
 	struct stat stTwlFont;
 	u32 clusterSav = 0;
 	u32 clusterDonor = 0;
-	// u32 clusterGba = 0;
-	// u32 clusterGbaSav = 0;
+	u32 clusterVirtualSlot2Rom = 0;
+	u32 clusterVirtualSlot2Save = 0;
 	u32 clusterQuit = 0;
 	u32 clusterWideCheat = 0;
 	u32 clusterApPatch = 0;
@@ -537,15 +538,139 @@ static int runNdsFile(configuration* conf) {
 		clusterCheat = stCheat.st_ino;
 	}
 
-	if (dsiFeatures() && !conf->b4dsMode) {
-		/* if (stat(conf->gbaPath, &stGba) >= 0) {
-			clusterGba = stGba.st_ino;
+	if (conf->virtualSlot2RomPath && *conf->virtualSlot2RomPath) {
+		const u32 requestedType = conf->virtualSlot2SaveType;
+		const u32 writeFlag = conf->virtualSlot2Flags & SLOT2_SAVE_WRITABLE;
+		if ((strncmp(conf->virtualSlot2RomPath, "sd:/", 4) && strncmp(conf->virtualSlot2RomPath, "fat:/", 5)) ||
+			(!strncmp(conf->virtualSlot2RomPath, "sd:", 3) && (!conf->sdFound || conf->b4dsMode)) ||
+			requestedType > GBA_SAVE_EEPROM)
+			return -3;
+
+		if (stat(conf->virtualSlot2RomPath, &stVirtualSlot2Rom) || !S_ISREG(stVirtualSlot2Rom.st_mode) ||
+			stVirtualSlot2Rom.st_size < 0xC0 ||
+			stVirtualSlot2Rom.st_size > 0x02000000 || stVirtualSlot2Rom.st_ino < 2 || stVirtualSlot2Rom.st_ino >= 0x0FFFFFF0)
+			return -3;
+		// Keep the virtual GBA ROM separate from the NDS save.
+		if (clusterSav && stVirtualSlot2Rom.st_ino == clusterSav &&
+			(!strncmp(conf->virtualSlot2RomPath, "fat:", 4)) == (!strncmp(conf->savPath, "fat:", 4)))
+			return -3;
+		FILE* rom = fopen(conf->virtualSlot2RomPath, "rb");
+		if (!rom)
+			return -3;
+		const size_t got = fread(conf->virtualSlot2Header, 1, sizeof(conf->virtualSlot2Header), rom);
+		if (got != sizeof(conf->virtualSlot2Header) || conf->virtualSlot2Header[0xB2] != 0x96) {
+			fclose(rom);
+			return -3;
 		}
+		conf->virtualSlot2SaveType = requestedType;
+		if (requestedType == GBA_SAVE_AUTO && conf->virtualSlot2SavPath && *conf->virtualSlot2SavPath) {
+			// These GBA ROMs contain tags for more than one save type.
+			const u8* gameCode = conf->virtualSlot2Header + 0xAC;
+			if (!memcmp(gameCode, "BR4J", 4)) { // Rockman EXE 4.5: FLASH512_V131, SRAM_V113
+				conf->virtualSlot2SaveType = GBA_SAVE_FLASH512;
+			} else if (!memcmp(gameCode, "BYUJ", 4) || // Yggdra Union: EEPROM_V126, SRAM_V113
+				!memcmp(gameCode, "BKMJ", 4) || // Kim Possible (Japan): EEPROM_V124, FLASH512_V131
+				!memcmp(gameCode, "BKMP", 4) || // Kim Possible 2 (Europe): EEPROM_V124, FLASH512_V131
+				!memcmp(gameCode, "BKME", 4)) { // Kim Possible 2 (USA): EEPROM_V124, FLASH512_V131
+				conf->virtualSlot2SaveType = GBA_SAVE_EEPROM;
+			} else {
+				// Detect the common SDK tag prefix, without matching its version.
+				u8 buffer[0x420];
+				size_t carry = 0, bytes;
+				u32 saveTypes = 0;
+				conf->virtualSlot2SaveType = GBA_SAVE_NONE;
+				while ((bytes = fread(buffer + carry, 1, 0x400, rom)) != 0) {
+					const size_t size = carry + bytes;
+					memset(buffer + size, 0, 10);
+					for (size_t i = 0; i < size; i++) {
+						u32 type = GBA_SAVE_NONE;
+						if (buffer[i] == 'S' && (!memcmp(buffer + i, "SRAM_V", 6) || !memcmp(buffer + i, "SRAM_F_V", 8))) {
+							type = GBA_SAVE_SRAM;
+						} else if (buffer[i] == 'F') {
+							if (!memcmp(buffer + i, "FLASH1M_V", 9))
+								type = GBA_SAVE_FLASH1M;
+							else if (!memcmp(buffer + i, "FLASH_V", 7) || !memcmp(buffer + i, "FLASH512_V", 10))
+								type = GBA_SAVE_FLASH512;
+						} else if (buffer[i] == 'E' && !memcmp(buffer + i, "EEPROM_V", 8)) {
+							type = GBA_SAVE_EEPROM;
+						}
+						if (type != GBA_SAVE_NONE)
+							saveTypes |= 1u << type;
+					}
+					carry = size < 9 ? size : 9;
+					memmove(buffer, buffer + size - carry, carry);
+				}
+				// Missing or conflicting tags leave ROM-only access; an explicit type can override them.
+				for (u32 type = GBA_SAVE_SRAM; type <= GBA_SAVE_EEPROM; type++) {
+					if (saveTypes == (1u << type))
+						conf->virtualSlot2SaveType = type;
+				}
+			}
+		}
+		const bool romError = ferror(rom);
+		fclose(rom);
+		if (romError)
+			return -3;
+		clusterVirtualSlot2Rom = stVirtualSlot2Rom.st_ino;
+		conf->virtualSlot2RomSize = stVirtualSlot2Rom.st_size;
+		conf->virtualSlot2Flags = writeFlag | (!strncmp(conf->virtualSlot2RomPath, "fat:", 4) ? SLOT2_ROM_ON_FLASHCARD : 0);
 
-		if (stat(conf->gbaSavPath, &stGbaSav) >= 0) {
-			clusterGbaSav = stGbaSav.st_ino;
-		} */
+		if (conf->virtualSlot2SavPath && *conf->virtualSlot2SavPath &&
+			conf->virtualSlot2SaveType >= GBA_SAVE_SRAM && conf->virtualSlot2SaveType <= GBA_SAVE_FLASH1M) {
+			const u32 saveSize = conf->virtualSlot2SaveType == GBA_SAVE_SRAM ? 0x8000
+				: conf->virtualSlot2SaveType == GBA_SAVE_FLASH512 ? 0x10000 : 0x20000;
+			if ((strncmp(conf->virtualSlot2SavPath, "sd:/", 4) && strncmp(conf->virtualSlot2SavPath, "fat:/", 5)) ||
+				!strcmp(conf->virtualSlot2RomPath, conf->virtualSlot2SavPath) ||
+				!strcmp(conf->ndsPath, conf->virtualSlot2SavPath) ||
+				(conf->savPath && !strcmp(conf->savPath, conf->virtualSlot2SavPath)) ||
+				(!strncmp(conf->virtualSlot2SavPath, "sd:", 3) && (!conf->sdFound || conf->b4dsMode)))
+				return -4;
+			if (stat(conf->virtualSlot2SavPath, &stVirtualSlot2Save)) {
+				if (errno != ENOENT)
+					return -4;
+				FILE* save = fopen(conf->virtualSlot2SavPath, "wb");
+				if (!save)
+					return -4;
+				u8 buffer[0x400];
+				memset(buffer, 0xFF, sizeof(buffer));
+				bool saveError = false;
+				for (u32 offset = 0; offset < saveSize; offset += sizeof(buffer)) {
+					if (fwrite(buffer, 1, sizeof(buffer), save) != sizeof(buffer)) {
+						saveError = true;
+						break;
+					}
+				}
+				if (fclose(save))
+					saveError = true;
+				if (saveError || stat(conf->virtualSlot2SavPath, &stVirtualSlot2Save)) {
+					remove(conf->virtualSlot2SavPath);
+					return -4;
+				}
+			}
+			if (!S_ISREG(stVirtualSlot2Save.st_mode) ||
+				stVirtualSlot2Save.st_size < saveSize || stVirtualSlot2Save.st_ino < 2 || stVirtualSlot2Save.st_ino >= 0x0FFFFFF0)
+				return -4;
+			clusterVirtualSlot2Save = stVirtualSlot2Save.st_ino;
+			conf->virtualSlot2SaveSize = saveSize;
+			if (!strncmp(conf->virtualSlot2SavPath, "fat:", 4))
+				conf->virtualSlot2Flags |= SLOT2_SAVE_ON_FLASHCARD;
+			if (clusterVirtualSlot2Rom == clusterVirtualSlot2Save &&
+				!!(conf->virtualSlot2Flags & SLOT2_ROM_ON_FLASHCARD) == !!(conf->virtualSlot2Flags & SLOT2_SAVE_ON_FLASHCARD))
+				return -4;
+			/* Keep the NDS ROM/save separate from the virtual GBA save. */
+			const bool saveOnFlashcard = conf->virtualSlot2Flags & SLOT2_SAVE_ON_FLASHCARD;
+			if ((clusterVirtualSlot2Save == st.st_ino && (!strncmp(conf->ndsPath, "fat:", 4)) == saveOnFlashcard) ||
+				(clusterSav && clusterVirtualSlot2Save == clusterSav && (!strncmp(conf->savPath, "fat:", 4)) == saveOnFlashcard))
+				return -4;
+		} else {
+			conf->virtualSlot2SaveSize = 0;
+			if (conf->virtualSlot2SaveType != GBA_SAVE_EEPROM)
+				conf->virtualSlot2SaveType = GBA_SAVE_NONE;
+		}
+		conf->virtualSlot2Flags |= SLOT2_ENABLED;
+	}
 
+	if (dsiFeatures() && !conf->b4dsMode) {
 		if (stat(wideCheatFilePath.c_str(), &stWideCheat) >= 0) {
 			clusterWideCheat = stWideCheat.st_ino;
 		}
@@ -579,13 +704,13 @@ static int runNdsFile(configuration* conf) {
 		clusterTwlFont = stTwlFont.st_ino;
 	}
 
-	return runNds(st.st_ino, clusterSav, clusterDonor, /* clusterGba, clusterGbaSav, */ clusterQuit, clusterWideCheat, clusterApPatch, clusterApPatchPostCardRead, clusterDSi2DSSave, clusterCheat, clusterPatchOffsetCache, clusterRamDump, clusterSrParams, clusterScreenshot, apFixOverlaysCluster, musicCluster, clusterPageFile, clusterManual, clusterTwlFont, conf);
+	return runNds(st.st_ino, clusterSav, clusterDonor, clusterVirtualSlot2Rom, clusterVirtualSlot2Save, clusterQuit, clusterWideCheat, clusterApPatch, clusterApPatchPostCardRead, clusterDSi2DSSave, clusterCheat, clusterPatchOffsetCache, clusterRamDump, clusterSrParams, clusterScreenshot, apFixOverlaysCluster, musicCluster, clusterPageFile, clusterManual, clusterTwlFont, conf);
 }
 
 int main(int argc, char** argv) {
 	fifoSendValue32(FIFO_PM, PM_REQ_SLEEP_DISABLE);
 
-	configuration* conf = (configuration*)malloc(sizeof(configuration));
+	configuration* conf = (configuration*)calloc(1, sizeof(configuration));
 
 	int status = loadFromSD(conf, argv[0]);
 	sdFound = (conf->sdFound && !conf->b4dsMode);
@@ -599,7 +724,11 @@ int main(int argc, char** argv) {
 				dbg_printf("Start failed. Error %i\n", status);
 			} else {
 				myConsoleDemoInit();
-				iprintf("Start failed. Error %i\n", status);
+				if (status == -3 || status == -4) {
+					iprintf("Invalid virtual Slot-2 ROM/save (%i).\n", status);
+				} else {
+					iprintf("Start failed. Error %i\n", status);
+				}
 			}
 		}
 	}
@@ -607,6 +736,8 @@ int main(int argc, char** argv) {
 	if (status != 0) {
 		free(conf->ndsPath);
 		free(conf->savPath);
+		free(conf->virtualSlot2RomPath);
+		free(conf->virtualSlot2SavPath);
 		free(conf);
 
 		stop();

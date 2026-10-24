@@ -35,7 +35,7 @@ typedef struct cardengineArm9Patches {
 	u32* dsiSaveWrite;
 	u32* cardStructArm9;
 	u32* waitSysCycles;
-	u32* cart_read;
+	u32* virtualSlot2Patches;
 	u32* cacheFlushRef;
 	u32* cardEndReadDmaRef;
 	u32* sleepRef;
@@ -64,7 +64,7 @@ typedef struct cardengineArm9ThumbPatches {
     u32* nand_write_arm9;
     u32* cardStructArm9;
     u32* card_pull; // Unused
-    u32* cart_read;
+    u32 reserved;
     u32* cacheFlushRef;
     u32* cardEndReadDmaRef;
     u32* sleepRef;
@@ -177,6 +177,7 @@ typedef struct cardengineArm9Patches {
 	u32* dsiSaveWrite;
 	u32* musicPlay;
 	u32* musicStopEffect;
+	u32* virtualSlot2Patches;
 } cardengineArm9Patches;
 
 

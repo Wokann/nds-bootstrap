@@ -3,6 +3,7 @@
 
 //#include <limits.h> // ARG_MAX
 #include <nds/ndstypes.h>
+#include "virtual_slot2.h"
 
 typedef struct configuration {
     bool debug;
@@ -26,8 +27,8 @@ typedef struct configuration {
 	char* donorTwlOnlyPath;
 	char* quitPath;
 	// char* cleanDonorPath;
-	// char* gbaPath;
-	// char* gbaSavPath;
+	char* virtualSlot2RomPath;
+	char* virtualSlot2SavPath;
 	char* apPatchPath;
 	char* apPatchPostCardReadPath;
 	char* dsi2dsSavePatchPath;
@@ -36,8 +37,11 @@ typedef struct configuration {
 	u32 donorFileOffset;
 	u32 romSize;
 	u32 saveSize;
-	// u32 gbaRomSize;
-	// u32 gbaSaveSize;
+	u32 virtualSlot2RomSize;
+	u32 virtualSlot2SaveSize;
+	u32 virtualSlot2Flags;
+	u32 virtualSlot2SaveType;
+	u8 virtualSlot2Header[0xC0];
 	u32 wideCheatSize;
 	u32 apPatchOffset;
 	u32 apPatchSize;

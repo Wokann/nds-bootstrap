@@ -38,6 +38,7 @@
 #include "locations.h"
 #include "cardengine_header_arm9.h"
 #include "unpatched_funcs.h"
+#include "virtual_slot2.h"
 
 #include "io_m3_common.h"
 #include "io_g6_common.h"
@@ -747,6 +748,19 @@ static void initialize(void) {
 
 	initialized = true;
 }
+
+#ifdef VIRTUAL_SLOT2
+int virtualSlot2Transfer(u32 op, u32 offset, void *buffer, u32 len) {
+	const int oldIME = enterCriticalSection();
+	const u16 exmemcnt = REG_EXMEMCNT;
+	setDeviceOwner();
+	initialize();
+	const int result = virtualSlot2FileIO(&virtualSlot2Config9, op, offset, buffer, len);
+	REG_EXMEMCNT = exmemcnt;
+	leaveCriticalSection(oldIME);
+	return result;
+}
+#endif
 
 void cardReadNormal(u8* dst, u32 src, u32 len) {
 	/*nocashMessage("begin\n");

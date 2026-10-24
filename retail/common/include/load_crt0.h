@@ -22,12 +22,12 @@ typedef struct loadCrt0 {
 	u32 donorFileCluster;
 	u32 donorFileSize;
 	u32 donorFileOffset;
-	// u32 gbaFileCluster;
-	// u32 gbaSaveFileCluster;
+	u32 virtualSlot2RomCluster;
+	u32 virtualSlot2SaveCluster;
 	u32 romSize;
 	u32 saveSize;
-	// u32 gbaRomSize;
-	// u32 gbaSaveSize;
+	u32 virtualSlot2RomSize;
+	u32 virtualSlot2SaveSize;
 	u32 quitFileCluster;
 	u32 dataToPreloadAddr[4];
 	u32 dataToPreloadSize[4];
@@ -77,6 +77,19 @@ typedef struct loadCrt0 {
 	u16 cacheBlockSize;
 	char bannerSavPath[64];
 	unsigned char version[20];
+	u32 virtualSlot2Magic;
+	u32 virtualSlot2Flags;
+	u32 virtualSlot2SaveType;
+	u8 virtualSlot2Header[0xC0];
 } loadCrt0;
+
+extern u32 virtualSlot2RomCluster;
+extern u32 virtualSlot2SaveCluster;
+extern u32 virtualSlot2RomSize;
+extern u32 virtualSlot2SaveSize;
+extern u32 virtualSlot2Magic;
+extern u32 virtualSlot2Flags;
+extern u32 virtualSlot2SaveType;
+extern u8 virtualSlot2Header[0xC0];
 
 #endif // LOAD_CRT0_H

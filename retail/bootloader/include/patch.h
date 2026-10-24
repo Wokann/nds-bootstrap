@@ -146,6 +146,9 @@ void setBLXThumb(int arg1, int arg2);
 u16* getOffsetFromBLThumb(const u16* blOffset);
 void codeCopy(u32* dst, u32* src, u32 len);
 void patchBinary(cardengineArm9* ce9, const tNDSHeader* ndsHeader, module_params_t* moduleParams);
+#ifdef LOADERTYPE0
+int patchVirtualSlot2(cardengineArm9* ce9, const tNDSHeader* ndsHeader);
+#endif
 u32 patchCardNdsArm9(
 	cardengineArm9* ce9,
 	const tNDSHeader* ndsHeader,

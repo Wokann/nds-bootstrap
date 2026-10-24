@@ -805,7 +805,6 @@ static void randomPatch5Second(const tNDSHeader* ndsHeader, const module_params_
 u32 patchCardNdsArm9(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const module_params_t* moduleParams, u32 patchMpuRegion, const bool buttonsRemapped) {
 
 	bool usesThumb;
-	//bool slot2usesThumb = false;
 	int readType;
 	int sdk5ReadType; // SDK 5
 	u32* cardReadEndOffset;

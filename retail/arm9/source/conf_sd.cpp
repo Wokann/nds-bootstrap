@@ -192,6 +192,13 @@ static int loadCardEngineBinary(const char* cardenginePath, u8* location) {
 	if(!cebin) {
 		return -ENOENT;
 	}
+	/* These staging regions also supply zero-filled BSS when copied by ARM7. */
+	if (location == (u8*)CARDENGINE_ARM9_LOCATION_BUFFERED
+	 || location == (u8*)CARDENGINEI_ARM9_BUFFERED_LOCATION
+	 || location == (u8*)CARDENGINEI_ARM9_SDK5_BUFFERED_LOCATION
+	 || location == (u8*)CARDENGINEI_ARM7_BUFFERED_LOCATION) {
+		toncset32(location, 0, 0x10000 / sizeof(u32));
+	}
 	fseek(cebin, 0, SEEK_END);
 	size = ftell(cebin);
 	fseek(cebin, 0, SEEK_SET);
@@ -391,11 +398,18 @@ static void load_conf(configuration* conf, const char* fn) {
 	// NDS path used when quitting game
 	conf->quitPath = strdup(config_file.fetch("NDS-BOOTSTRAP", "QUIT_PATH").c_str());
 
-	// GBA path
-	// conf->gbaPath = strdup(config_file.fetch("NDS-BOOTSTRAP", "GBA_PATH").c_str());
-
-	// GBA SAV path
-	// conf->gbaSavPath = strdup(config_file.fetch("NDS-BOOTSTRAP", "GBA_SAV_PATH").c_str());
+	conf->virtualSlot2RomPath = strdup(config_file.fetch("NDS-BOOTSTRAP", "VIRTUAL_SLOT2_ROM_PATH").c_str());
+	conf->virtualSlot2SavPath = strdup(config_file.fetch("NDS-BOOTSTRAP", "VIRTUAL_SLOT2_SAV_PATH").c_str());
+	conf->virtualSlot2SaveType = strtol(config_file.fetch("NDS-BOOTSTRAP", "VIRTUAL_SLOT2_SAVE_TYPE", "0").c_str(), NULL, 0);
+	if (strtol(config_file.fetch("NDS-BOOTSTRAP", "VIRTUAL_SLOT2_SAVE_WRITE", "1").c_str(), NULL, 0)) {
+		conf->virtualSlot2Flags |= SLOT2_SAVE_WRITABLE;
+	}
+	if (strtol(config_file.fetch("NDS-BOOTSTRAP", "VIRTUAL_SLOT2_EMPTY", "0").c_str(), NULL, 0)) {
+		conf->virtualSlot2Flags = SLOT2_EMPTY;
+		conf->virtualSlot2RomPath[0] = 0;
+		conf->virtualSlot2SavPath[0] = 0;
+		conf->virtualSlot2SaveType = GBA_SAVE_NONE;
+	}
 
 	// AP-patch path
 	// conf->apPatchPath = strdup(config_file.fetch("NDS-BOOTSTRAP", "AP_FIX_PATH").c_str());
@@ -1053,6 +1067,11 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 
 	if (conf->isDSiWare) {
 		conf->valueBits2 |= BIT(0);
+		// This loader does not redirect Slot-2 for DSiWare.
+		conf->virtualSlot2Flags = 0;
+		conf->virtualSlot2RomPath[0] = 0;
+		conf->virtualSlot2SavPath[0] = 0;
+		conf->virtualSlot2SaveType = GBA_SAVE_NONE;
 	}
 
 	if (conf->isDSiWare || (accessControl & BIT(4))) {
@@ -1396,7 +1415,10 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 		fclose(ndsFile);
 		fclose(donorNdsFile);
 
-		if (!conf->bootstrapOnFlashcard && !conf->gameOnFlashcard && !conf->saveOnFlashcard) {
+		const bool virtualSlot2OnFlashcard = conf->virtualSlot2RomPath && conf->virtualSlot2RomPath[0]
+			&& (strncmp(conf->virtualSlot2RomPath, "fat:/", 5) == 0
+			 || (conf->virtualSlot2SavPath && strncmp(conf->virtualSlot2SavPath, "fat:/", 5) == 0));
+		if (!conf->bootstrapOnFlashcard && !conf->gameOnFlashcard && !conf->saveOnFlashcard && !virtualSlot2OnFlashcard) {
 			if (romTid[0] != 'I' && memcmp(romTid, "UZP", 3) != 0 && memcmp(romTid, "HND", 3) != 0 && memcmp(romTid, "UEI", 3) != 0) {
 				disableSlot1();
 			} else {
@@ -1942,8 +1964,6 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 		}
 
 		conf->saveSize = getFileSize(conf->savPath);
-		// conf->gbaRomSize = getFileSize(conf->gbaPath);
-		// conf->gbaSaveSize = getFileSize(conf->gbaSavPath);
 		conf->wideCheatSize = getFileSize(wideCheatFilePath.c_str());
 		// conf->apPatchSize = getFileSize(conf->apPatchPath);
 		conf->cheatSize = getFileSize(cheatFilePath.c_str());
@@ -2470,6 +2490,13 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 			loadCardEngineBinary(ce9path, (u8*)CARDENGINE_ARM9_LOCATION_BUFFERED);
 		}
 
+		/* ALT3 keeps virtual Slot-2 below the existing DLDI area. */
+		if ((conf->virtualSlot2RomPath && *conf->virtualSlot2RomPath) || (conf->virtualSlot2Flags & SLOT2_EMPTY)) {
+			loadCardEngineBinary(io_dldi_data->driverSize >= 0x0E
+				? "nitro:/cardengine_arm9_32.lz77" : (accessControl & BIT(4))
+				? "nitro:/cardengine_arm9.lz77" : "nitro:/cardengine_arm9_alt3.lz77",
+				(u8*)CARDENGINE_ARM9_LOCATION_BUFFERED);
+		}
 		cebin = fopen("nitro:/cardengine_arm9_dldipatcher.bin", "rb");
 		conf->dldiPatchBinaryOffset = offsetOfOpenedNitroFile;
 		fclose(cebin);

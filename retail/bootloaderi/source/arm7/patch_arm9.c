@@ -4,6 +4,8 @@
 #include "module_params.h"
 #include "patch.h"
 #include "find.h"
+#include "virtual_slot2.h"
+#include "load_crt0.h"
 #include "common.h"
 #include "value_bits.h"
 #include "cardengine_header_arm9.h"
@@ -19,7 +21,6 @@
 extern u8 gameOnFlashcard;
 extern u16 a9ScfgRom;
 
-extern bool gbaRomFound;
 extern bool dsiModeConfirmed;
 extern bool pkmnGen5;
 extern bool ce9DldiBinary;
@@ -463,6 +464,7 @@ static bool patchCardId(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const 
 }
 
 void patchGbaSlotInit_cont(const tNDSHeader* ndsHeader, bool usesThumb, bool searchAgainForThumb) {
+	if (virtualSlot2Magic == SLOT2_MAGIC && (virtualSlot2Flags & (SLOT2_ENABLED | SLOT2_EMPTY))) return;
 	extern u32 oldArm7mbk;
 	if (ndsHeader->unitCode == 0 || !dsiModeConfirmed || (oldArm7mbk == 0x080037C0 && *(u32*)0x02FFE1A0 == 0x080037C0) || *(u32*)0x02FFE1A0 == 0x00403000) {
 		return;
@@ -1389,78 +1391,6 @@ bool patchStrmPageLoad(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const m
     dbg_printf("\n\n");
 	return true;
 }
-
-/*static bool patchCartExist(const tNDSHeader* ndsHeader, const module_params_t* moduleParams, bool usesThumb) {
-	// Slot-2 cart exist
-	u32* offset = patchOffsetCache.cartExistOffset;
-	if (!patchOffsetCache.cartExistOffsetChecked) {
-		offset = findCartExistOffset(ndsHeader, usesThumb);
-		if (offset) {
-			patchOffsetCache.cartExistOffset = offset;
-		}
-		patchOffsetCache.cartExistOffsetChecked = true;
-	}
-	if (!offset) {
-		return false;
-	}
-
-	// Patch
-	if (usesThumb) {
-		u16* thumbOffset = (u16*)offset;
-
-		thumbOffset[0] = 0x2001;	// movs r0, #1
-		thumbOffset[1] = 0x4770;	// bx lr
-	} else {
-		offset[0] = 0xE3A00001;	// mov r0, #1
-		offset[1] = 0xE12FFF1E;	// bx lr
-	}
-    dbg_printf("cartExist location : ");
-    dbg_hexa((u32)offset);
-    dbg_printf("\n\n");
-	return true;
-}
-
-static void patchCartInfoInitConstant(const tNDSHeader* ndsHeader, const module_params_t* moduleParams, bool usesThumb) {
-	// Slot-2 cart info init
-	u32* offset = patchOffsetCache.cartInfoInitConstantOffset;
-	if (!patchOffsetCache.cartInfoInitConstantOffset) {
-		offset = findCartInfoInitConstantOffset(ndsHeader, moduleParams, usesThumb);
-		if (offset) {
-			patchOffsetCache.cartInfoInitConstantOffset = offset;
-		}
-	}
-	if (!offset) {
-		return;
-	}
-
-	// Patch
-	*offset = 0x027FFA00;
-    dbg_printf("cartInfoInitConstant location : ");
-    dbg_hexa((u32)offset);
-    dbg_printf("\n\n");
-}
-
-static void patchCartRead(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const module_params_t* moduleParams, bool usesThumb) {
-	// Slot-2 cart read
-	u32* offset = patchOffsetCache.cartReadOffset;
-	if (!patchOffsetCache.cartReadOffsetChecked) {
-		offset = findCartReadOffset(ndsHeader, usesThumb);
-		if (offset) {
-			patchOffsetCache.cartReadOffset = offset;
-		}
-		patchOffsetCache.cartReadOffsetChecked = true;
-	}
-	if (!offset) {
-		return;
-	}
-
-	// Patch
-	u32* cartReadPatch = (usesThumb ? ce9->thumbPatches->cart_read : ce9->patches->cart_read);
-	tonccpy(offset, cartReadPatch, 0x40);
-    dbg_printf("cartRead location : ");
-    dbg_hexa((u32)offset);
-    dbg_printf("\n\n");
-}*/
 
 static void patchWaitSysCycles(const cardengineArm9* ce9, const tNDSHeader* ndsHeader, const module_params_t* moduleParams) {
 	extern u32 waitSysCyclesOffset;
@@ -2780,7 +2710,6 @@ void codeCopy(u32* dst, u32* src, u32 len) {
     ce9->patches->nand_write_arm9 = (u32*)((u32)ce9->patches->nand_write_arm9 - default_location + current_location);
     ce9->patches->cardStructArm9 = (u32*)((u32)ce9->patches->cardStructArm9 - default_location + current_location);
     ce9->patches->waitSysCycles = (u32*)((u32)ce9->patches->waitSysCycles - default_location + current_location);
-    ce9->patches->cart_read = (u32*)((u32)ce9->patches->cart_read - default_location + current_location);
     ce9->patches->cacheFlushRef = (u32*)((u32)ce9->patches->cacheFlushRef - default_location + current_location);
     ce9->patches->cardEndReadDmaRef = (u32*)((u32)ce9->patches->cardEndReadDmaRef - default_location + current_location);
     ce9->patches->sleepRef = (u32*)((u32)ce9->patches->sleepRef - default_location + current_location);
@@ -2799,7 +2728,6 @@ void codeCopy(u32* dst, u32* src, u32 len) {
     ce9->thumbPatches->nand_write_arm9 = (u32*)((u32)ce9->thumbPatches->nand_write_arm9 - default_location + current_location);
     ce9->thumbPatches->cardStructArm9 = (u32*)((u32)ce9->thumbPatches->cardStructArm9 - default_location + current_location);
     ce9->thumbPatches->card_pull = (u32*)((u32)ce9->thumbPatches->card_pull - default_location + current_location);
-    ce9->thumbPatches->cart_read = (u32*)((u32)ce9->patches->cart_read - default_location + current_location);
     ce9->thumbPatches->cacheFlushRef = (u32*)((u32)ce9->thumbPatches->cacheFlushRef - default_location + current_location);
     ce9->thumbPatches->cardEndReadDmaRef = (u32*)((u32)ce9->thumbPatches->cardEndReadDmaRef - default_location + current_location);
     ce9->thumbPatches->sleepRef = (u32*)((u32)ce9->thumbPatches->sleepRef - default_location + current_location);
@@ -3186,7 +3114,6 @@ static void operaRamPatchJpn(void) {
 u32 patchCardNdsArm9(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const module_params_t* moduleParams, const ltd_module_params_t* ltdModuleParams, u32 ROMinRAM, u32 patchMpuRegion, const bool usesCloneboot, const bool buttonsRemapped) {
 
 	bool usesThumb;
-	//bool slot2usesThumb = false;
 	int readType;
 	int sdk5ReadType; // SDK 5
 	u32* cardReadEndOffset;
@@ -3314,13 +3241,7 @@ u32 patchCardNdsArm9(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const mod
 		} else {
 			operaRamPatch();
 		}
-	} /*else if (gbaRomFound) {
-		if (patchCartExist(ndsHeader, moduleParams, usesThumb)) {
-			patchCartInfoInitConstant(ndsHeader, moduleParams, usesThumb);
-
-			patchCartRead(ce9, ndsHeader, moduleParams, usesThumb);
-		}
-	}*/
+	}
 
 	nandSavePatch(ce9, ndsHeader, moduleParams);
 
@@ -3338,3 +3259,542 @@ u32 patchCardNdsArm9(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const mod
 	dbg_printf("ERR_NONE\n\n");
 	return ERR_NONE;
 }
+
+// Slot-2 SDK patches
+#ifdef LOADERTYPE0
+
+#define SLOT2_NO_OFFSET 0xFFFFFFFFu
+#define MAX_SLOT2_PATCHES 128u
+
+typedef struct {
+	unsigned functions, geometry;
+} Slot2FlashDriverLayout;
+
+static const Slot2FlashDriverLayout slot2FlashDriverLayout2 = {3, 0x14}; // 3 driver pointers; geometry +0x14
+static const Slot2FlashDriverLayout slot2FlashDriverLayout31 = {6, 0x20}; // sync + async, polling, time, geometry
+
+typedef struct {
+	u32 offset, before, after;
+} Slot2PatchWord;
+typedef struct {
+	u8* data;
+	u32 size, ram, count, setTask;
+	const VirtualSlot2Patches* patches;
+	Slot2PatchWord jobs[MAX_SLOT2_PATCHES];
+} Slot2PatchContext;
+
+static int isAddressValid(const Slot2PatchContext* v, u32 address, u32 len) {
+	return address >= v->ram && len <= v->size && address - v->ram <= v->size - len;
+}
+static u32 readWord(const Slot2PatchContext* v, u32 p) {
+	const u8* q = v->data + p;
+	return (u32)q[0] | (u32)q[1] << 8 | (u32)q[2] << 16 | (u32)q[3] << 24;
+}
+static u16 readHalfword(const Slot2PatchContext* v, u32 p) {
+	return (u16)v->data[p] | (u16)v->data[p + 1] << 8;
+}
+static u32 thumbLiteral(const Slot2PatchContext* v, u32 p) {
+	if (p > v->size - 2 || (readHalfword(v, p) & 0xF800) != 0x4800)
+		return SLOT2_NO_OFFSET;
+	u32 address = ((v->ram + p + 4) & ~3u) + (readHalfword(v, p) & 255) * 4;
+	return isAddressValid(v, address, 4) ? address - v->ram : SLOT2_NO_OFFSET;
+}
+static u32 thumbTarget(const Slot2PatchContext* v, u32 p) {
+	if (p > v->size - 4)
+		return SLOT2_NO_OFFSET;
+	u16 a = readHalfword(v, p), b = readHalfword(v, p + 2);
+	if ((a & 0xF800) != 0xF000 || (b & 0xE800) != 0xE800)
+		return SLOT2_NO_OFFSET;
+	s32 delta = ((s32)((u32)(a & 0x7FF) << 21) >> 9) + ((b & 0x7FF) << 1);
+	u32 target = v->ram + p + 4 + delta;
+	return b & 0x1000 ? target | 1 : target & ~3u;
+}
+static int isArmFunctionStart(u32 w) {
+	return (w & 0xFFFF4000u) == 0xE92D4000u;
+}
+static u32 findArmLiteralOffset(const Slot2PatchContext* v, u32 p) {
+	u32 w = readWord(v, p), target;
+	if ((w & 0x0F7F0000u) != 0x051F0000u)
+		return SLOT2_NO_OFFSET;
+	if (w & 0x800000u)
+		target = p + 8 + (w & 0xFFFu);
+	else {
+		if (p + 8 < (w & 0xFFFu))
+			return SLOT2_NO_OFFSET;
+		target = p + 8 - (w & 0xFFFu);
+	}
+	return target <= v->size - 4 && !(target & 3) ? target : SLOT2_NO_OFFSET;
+}
+static int addPatchWord(Slot2PatchContext* v, u32 p, u32 value) {
+	if ((p & 3) || p > v->size - 4)
+		return 0;
+	for (u32 i = 0; i < v->count; i++)
+		if (v->jobs[i].offset == p)
+			return v->jobs[i].after == value;
+	if (v->count == MAX_SLOT2_PATCHES)
+		return 0;
+	v->jobs[v->count].offset = p;
+	v->jobs[v->count].before = readWord(v, p);
+	v->jobs[v->count++].after = value;
+	return 1;
+}
+static int addThumb(Slot2PatchContext* v, u32 p, const u16* values, unsigned count) {
+	if ((p & 1) || count * 2 > v->size || p > v->size - count * 2)
+		return 0;
+	u32 end = (p + count * 2 + 3) & ~3u;
+	if (end > v->size)
+		return 0;
+	/* Pack a complete span into the existing readWord jobs. Never mutate an
+	 * earlier job, so the existing per-entry rollback remains sufficient. */
+	for (u32 q = p & ~3u; q < end; q += 4) {
+		u32 before = readWord(v, q), after = before;
+		for (unsigned i = 0; i < count; i++) {
+			u32 at = p + i * 2;
+			if (at >= q && at < q + 4) {
+				unsigned shift = (at & 2) * 8;
+				after = (after & ~(0xFFFFu << shift)) | (u32)values[i] << shift;
+			}
+		}
+		if (after != before && !addPatchWord(v, q, after))
+			return 0;
+	}
+	return 1;
+}
+static int patchArmJump(Slot2PatchContext* v, u32 address, u32 target) {
+	if (!target || !isAddressValid(v, address, 12) || !isArmFunctionStart(readWord(v, address - v->ram)))
+		return 0;
+	u32 p = address - v->ram;
+	return addPatchWord(v, p, 0xE59FC000u) && addPatchWord(v, p + 4, 0xE12FFF1Cu) && addPatchWord(v, p + 8, target);
+}
+static int patchThumbJump(Slot2PatchContext* v, u32 address, u32 target) {
+	u32 p = address - v->ram;
+	unsigned pad = (address & 2) != 0;
+	if (!target || !isAddressValid(v, address, 8 + pad * 2) || (readHalfword(v, p) & 0xFF00) != 0xB500)
+		return 0;
+	/* Presence and the three-argument pulled callback can use scratch r3. */
+	u16 code[5] = {0x4B00 | pad, 0x4718, 0x46C0, 0, 0};
+	code[2 + pad] = target;
+	code[3 + pad] = target >> 16;
+	return addThumb(v, p, code, 4 + pad);
+}
+static int patchArmCall(Slot2PatchContext* v, u32 p, u32 target) {
+	if (!target)
+		return 0;
+	s32 delta = (s32)((target & ~1u) - (v->ram + p + 8));
+	if (delta < -0x02000000 || delta > 0x01FFFFFE || (delta & 1))
+		return 0;
+	if (!(target & 1) && (delta & 3))
+		return 0;
+	u32 branch = generateA7Instr(v->ram + p, target & ~1u);
+	if (target & 1)
+		branch = (branch & 0xFFFFFFu) | 0xFA000000u | ((delta & 2) << 23);
+	return addPatchWord(v, p, branch);
+}
+static int singleThumbLiteral(const Slot2PatchContext* v, u32 pool, u32 ref) {
+	u32 start = pool > 0x1008 ? pool - 0x1008 : 0;
+	u32 end = v->size - pool > 0x1008 ? pool + 0x1008 : v->size;
+	for (u32 p = start & ~1u; p + 2 <= end; p += 2) {
+		if (p == ref)
+			continue;
+		if (thumbLiteral(v, p) == pool || (!(p & 3) && p + 4 <= end && findArmLiteralOffset(v, p) == pool))
+			return 0;
+	}
+	return 1;
+}
+
+static int patchSlot2ModuleInfo(Slot2PatchContext* v, u32 start, u32 headerOffset, bool usesThumb) {
+	if (usesThumb) {
+		u32 target = v->patches->moduleInfo.thumb;
+		if (!target || v->size - start < 0xF0)
+			return 0;
+		u32 end = start + 0xF0, finish = end - 12, found = start + 0x58;
+		u32 irq = thumbTarget(v, finish), dma = thumbTarget(v, found);
+		u16 channel = readHalfword(v, found - 10);
+		u32 pool = thumbLiteral(v, found - 8), dst = thumbLiteral(v, found - 6);
+		if (thumbLiteral(v, start + 4) != end || !isAddressValid(v, irq & ~1u, 4) || thumbTarget(v, start + 0x1C) != irq ||
+			readHalfword(v, start + 0x20) != 0x1C07 || readHalfword(v, end - 14) != 0x1C38 ||
+			!findOffsetThumb((const u16*)(v->data + end - 8), 2, slot2ModuleInfoEndSignatureThumb2, 4) ||
+			!isAddressValid(v, dma & ~1u, 4) || channel < 0x2000 || channel > 0x2003 ||
+			readHalfword(v, found - 8) >> 8 != 0x49 || readHalfword(v, found - 6) >> 8 != 0x4A ||
+			!findOffsetThumb((const u16*)(v->data + found - 4), 2, slot2ModuleInfoHeaderSignatureThumb2, 2) ||
+			pool == SLOT2_NO_OFFSET || dst == SLOT2_NO_OFFSET || readWord(v, pool) != 0x08000080 || readWord(v, dst) < 0x02000000 ||
+			readWord(v, dst) > 0x02800000 - 0xC0 || !singleThumbLiteral(v, pool, found - 8))
+			return 0;
+		u32 pc = (v->ram + finish + 4) & ~3u;
+		if (v->ram + pool < pc || v->ram + pool - pc > 1020 || readHalfword(v, start + 0x0A) != 0xD16D ||
+			readHalfword(v, start + 0x18) != 0xD066)
+			return 0;
+		/* Reuse only the exclusively referenced GBA-header literal. Both calls
+		 * use BLX-register, so the CE may be beyond Thumb BL's +/-4MiB range. */
+		const u16 copy[] = {0x4788, 0x46C0}; // BLX r1; NOP
+		const u16 tail[] = {0x4B00 | ((v->ram + pool - pc) >> 2), 0x2100, 0x4798, 0xB005, 0xBDF0, 0x46C0};
+		// Early returns skip the new three-instruction call and retain native cleanup.
+		const u16 branch1 = 0xD16E, branch2 = 0xD067;
+		return addPatchWord(v, pool, target) && addThumb(v, found, copy, 2) && addThumb(v, finish, tail, 6) &&
+			   addThumb(v, start + 0x0A, &branch1, 1) && addThumb(v, start + 0x18, &branch2, 1);
+	}
+
+	if (!headerOffset || v->size - start < headerOffset + 4)
+		return 0;
+	u32 copy = start + headerOffset;
+	u32 source = copy - (headerOffset == 0xA8 ? 24 : 16);
+	u32 destination = copy - (headerOffset == 0xA8 ? 32 : 20);
+	u32 dma = readWord(v, copy - (headerOffset == 0xA8 ? 20 : 12));
+	u32 sourcePool = findArmLiteralOffset(v, source), destinationPool = findArmLiteralOffset(v, destination);
+	if (sourcePool == SLOT2_NO_OFFSET || destinationPool == SLOT2_NO_OFFSET || dma < 0xE3A00000 || dma > 0xE3A00003 ||
+		(readWord(v, source) & 0xFFFFF000) != 0xE59F1000 || (readWord(v, destination) & 0xFFFFF000) != 0xE59F2000 ||
+		readWord(v, sourcePool) != 0x08000080 || readWord(v, destinationPool) < 0x02000000 ||
+		readWord(v, destinationPool) > 0x02800000 - 0xC0 ||
+		!findOffset((const u32*)(v->data + copy - 8), 4,
+					headerOffset == 0xA8 ? slot2ModuleInfoHeaderSignature2 : slot2ModuleInfoHeaderSignature3, 2))
+		return 0;
+	// The fixed entry LDR gives the native pool, directly after this SDK body.
+	u32 pool = findArmLiteralOffset(v, start + 8);
+	if (pool == SLOT2_NO_OFFSET || pool < start + 16)
+		return 0;
+	bool interwork = readWord(v, pool - 4) == 0xE12FFF1E;
+	u32 finish = pool - (interwork ? 16 : 12);
+	const u32* signature =
+		readWord(v, start + 4) == 0xE24DD014 ? slot2ModuleInfoFinishSignature3 : slot2ModuleInfoFinishSignature4;
+	if (interwork)
+		signature = slot2ModuleInfoFinishSignature2;
+	if (copy + 4 > finish || (readWord(v, copy) >> 24) != 0xEB || (readWord(v, finish) >> 24) != 0xEB ||
+		!findOffset((const u32*)(v->data + finish + 4), 4, signature, interwork ? 3 : 2))
+		return 0;
+	return patchArmCall(v, copy, v->patches->moduleInfo.copyHeader) &&
+		   patchArmCall(v, finish, v->patches->moduleInfo.finish);
+}
+static int patchSlot2FlashTask(Slot2PatchContext* v, u32 address, u32 replacement) {
+	if (!replacement || !isAddressValid(v, address, 0x50))
+		return 0;
+	u32 start = address - v->ram, pool = SLOT2_NO_OFFSET;
+	if (!isArmFunctionStart(readWord(v, start)) || readWord(v, start + 4) != 0xE24DD024u)
+		return 0;
+	for (u32 p = start + 8; p < start + 0x50; p += 4) {
+		u32 w = readWord(v, p), q = findArmLiteralOffset(v, p);
+		if (q != SLOT2_NO_OFFSET && ((w >> 12) & 15) == 1)
+			pool = q;
+		if ((w >> 24) == 0xEB) {
+			s32 disp = (s32)(w << 8) >> 6;
+			u32 target = v->ram + p + 8 + disp;
+			if (pool == SLOT2_NO_OFFSET || !isAddressValid(v, target, 4) || !isAddressValid(v, readWord(v, pool), 12) ||
+				!isArmFunctionStart(readWord(v, readWord(v, pool) - v->ram)))
+				return 0;
+			if (v->setTask && v->setTask != target)
+				return 0;
+			v->setTask = target;
+			return addPatchWord(v, pool, replacement);
+		}
+		if (w == 0xE12FFF1Eu || (w & 0xFFFF8000u) == 0xE8BD8000u)
+			return 0;
+	}
+	return 0;
+}
+static unsigned slot2FlashDriverCount(const Slot2PatchContext* v, u32 address) {
+	if (address & 3)
+		return 0;
+	const Slot2FlashDriverLayout* layouts[] = {&slot2FlashDriverLayout2, &slot2FlashDriverLayout31};
+	for (unsigned variant = 0; variant < sizeof(layouts) / sizeof(layouts[0]); variant++) {
+		unsigned count = layouts[variant]->functions, geometry = layouts[variant]->geometry;
+		if (!isAddressValid(v, address, geometry + 12))
+			continue;
+		u32 p = address - v->ram, size = readWord(v, p + geometry);
+		if ((size != 0x10000 && size != 0x20000) || readWord(v, p + geometry + 4) != 0x1000 ||
+			readWord(v, p + geometry + 8) != ((size >> 12) << 16 | 12))
+			continue;
+		unsigned i;
+		for (i = 0; i < count; i++) {
+			u32 fn = readWord(v, p + i * 4);
+			if ((fn & 3) || !isAddressValid(v, fn, 12) || !isArmFunctionStart(readWord(v, fn - v->ram)))
+				break;
+		}
+		if (i == count)
+			return count;
+	}
+	return 0;
+}
+
+static int patchSlot2FlashIdentify(Slot2PatchContext* v, u32 start, u32 idAddress) {
+	u32 end = v->size - start > 0x600 ? start + 0x600 : v->size;
+	for (u32 p = start; p + 4 <= end && p < start + 0x40; p += 4) {
+		u32 pool = findArmLiteralOffset(v, p);
+		if (pool > p && pool < end)
+			end = pool;
+	}
+	const u32* signatures[] = {slot2FlashMakerSignature2, slot2FlashMakerSignature21, slot2FlashMakerSignature31,
+							   slot2FlashMakerSignature31Alt};
+	u32 found = 0;
+	if (end - start < 12)
+		return 0;
+	const u32* stop = (const u32*)(v->data + end - 8);
+	for (u32 i = 0; i < sizeof(signatures) / sizeof(signatures[0]); i++) {
+		const u32* cursor = (const u32*)(v->data + start);
+		while (cursor < stop) {
+			const u32* match = findOffset(cursor, (stop - cursor) * 4, signatures[i], 2);
+			if (!match)
+				break;
+			cursor = match + 1;
+			if (match[2] >> 24 != 0x0A)
+				continue;
+			u32 off = ((match[0] >> 4) & 0xF0) | (match[0] & 15);
+			if (found && found != off)
+				return 0;
+			found = off;
+		}
+	}
+	u32 seen[16], count = 0, ids = 0, maker = found;
+	if (!maker)
+		return 0;
+	for (u32 p = start; p < end; p += 4) {
+		u32 pool = findArmLiteralOffset(v, p);
+		if (pool == SLOT2_NO_OFFSET)
+			continue;
+		u32 table = readWord(v, pool);
+		if (!isAddressValid(v, table, 4))
+			continue;
+		for (unsigned i = 0; i < 8; i++) {
+			if (!isAddressValid(v, table + i * 4, 4))
+				return 0;
+			u32 info = readWord(v, table + i * 4 - v->ram);
+			unsigned functions = slot2FlashDriverCount(v, info);
+			if (!functions || !isAddressValid(v, info, maker + 4)) {
+				if (i)
+					return 0;
+				break;
+			}
+			u32 off = info - v->ram, id = readWord(v, off + maker) & 0xFFFF;
+			if (id > 255 || maker < (functions + 2) * 4 + 12)
+				return 0;
+			unsigned j;
+			for (j = 0; j < count && seen[j] != info; j++)
+				;
+			if (j < count) {
+				if (!id)
+					break;
+				continue;
+			}
+			if (count == 16)
+				return 0;
+			seen[count++] = info;
+			u32 shift = readWord(v, off + (functions + 2) * 4) == 0x20000 ? 8 : 0;
+			if (id && !(ids & (255u << shift)))
+				ids |= id << shift;
+			// Flash table order: sector write, chip erase, sector erase; synchronous then task entries.
+			const u32 replacement[] = {v->patches->card.flash.write[0], v->patches->card.flash.eraseChip[0],
+									   v->patches->card.flash.eraseSector[0]};
+			const u32 task[] = {v->patches->card.flash.write[1], v->patches->card.flash.eraseChip[1],
+								v->patches->card.flash.eraseSector[1]};
+			for (j = 0; j < 3; j++) {
+				if (!replacement[j] ||
+					(functions == 6 && !patchSlot2FlashTask(v, readWord(v, off + (j + 3) * 4), task[j])) ||
+					!addPatchWord(v, off + j * 4, replacement[j]))
+					return 0;
+			}
+			if (!id)
+				break;
+			if (i == 7)
+				return 0;
+		}
+	}
+	if (!ids || !v->patches->card.flash.id || !isAddressValid(v, idAddress, 20) ||
+		!isArmFunctionStart(readWord(v, idAddress - v->ram)))
+		return 0;
+
+	u32 p = idAddress - v->ram;
+	/* Choose a chip ID from each capacity's native table. Game/maker codes
+	 * in the virtual GBA header are left to the game itself. */
+	return addPatchWord(v, p, 0xE59F0008u) && addPatchWord(v, p + 4, 0xE59FC000u) &&
+		   addPatchWord(v, p + 8, 0xE12FFF1Cu) && addPatchWord(v, p + 12, v->patches->card.flash.id) &&
+		   addPatchWord(v, p + 16, ids);
+}
+
+static __attribute__((noinline)) u32 armTarget(const Slot2PatchContext* v, u32 p) {
+	if ((readWord(v, p) >> 24) != 0xEB)
+		return SLOT2_NO_OFFSET;
+	return v->ram + p + 8 + ((s32)(readWord(v, p) << 8) >> 6);
+}
+static u32 findSlot2GpioOffset(const Slot2PatchContext* v, const u32* signature, unsigned count, u32 back, u32 port) {
+	// Include the preceding call and all 48 bytes of the I/O region in the view.
+	const u32* cursor = (const u32*)(v->data + back + 4);
+	const u32* stop = cursor + (v->size / 4 - 12);
+	u32 result = SLOT2_NO_OFFSET;
+	while (cursor < stop) {
+		const u32* hit = findOffset(cursor, (stop - cursor) * 4, signature, count);
+		if (!hit)
+			break;
+		cursor = hit + 1;
+		u32 offset = (const u8*)hit - v->data;
+		u32 p = offset - back, pool = findArmLiteralOffset(v, p);
+		if ((readWord(v, p) & 0xFF7FF000u) != 0xE51F2000u || pool == SLOT2_NO_OFFSET || readWord(v, pool) != port)
+			continue;
+		if (result != SLOT2_NO_OFFSET)
+			return SLOT2_NO_OFFSET;
+		result = p;
+	}
+	return result;
+}
+static __attribute__((noinline)) int patchSlot2Gpio(Slot2PatchContext* v) {
+	u32 shadow = v->patches->gpioRegisters;
+	if (v->size < 48 || !shadow || !v->patches->gpio.begin || !v->patches->gpio.end)
+		return 0;
+	u32 data = findSlot2GpioOffset(v, slot2GpioDataSignature31, 7, 8, 0x080000C4u);
+	u32 init = findSlot2GpioOffset(v, slot2GpioInitSignature31, 3, 4, 0x080000C6u);
+	if (data == SLOT2_NO_OFFSET || init == SLOT2_NO_OFFSET)
+		return 0;
+	if ((readWord(v, data + 4) & 0xFF7FF000u) != 0xE51F0000u || readWord(v, data + 36) != 0xE1D000B6u ||
+		(readWord(v, init + 16) & 0xFF7FF000u) != 0xE51F0000u || readWord(v, init + 20) != 0xE1C210B2u ||
+		readWord(v, init + 24) != 0xE1D000B6u)
+		return 0;
+	u32 a = findArmLiteralOffset(v, data), b = findArmLiteralOffset(v, init);
+	u32 workA = findArmLiteralOffset(v, data + 4), workB = findArmLiteralOffset(v, init + 16);
+	u32 begin = armTarget(v, data - 4), end = armTarget(v, data + 40);
+	if (workA == SLOT2_NO_OFFSET || workB == SLOT2_NO_OFFSET || readWord(v, workA) != readWord(v, workB) ||
+		readWord(v, workA) < 0x02000000u || readWord(v, workA) > 0x03000000u - 0x1C || begin == end ||
+		!isAddressValid(v, begin, 4) || !isAddressValid(v, end, 4) || armTarget(v, init - 4) != begin ||
+		armTarget(v, init + 28) != end || !singleThumbLiteral(v, a, data) || !singleThumbLiteral(v, b, init))
+		return 0;
+	return addPatchWord(v, a, shadow) && addPatchWord(v, b, shadow + 2) &&
+		   patchArmCall(v, data - 4, v->patches->gpio.begin) && patchArmCall(v, data + 40, v->patches->gpio.end) &&
+		   patchArmCall(v, init - 4, v->patches->gpio.begin) && patchArmCall(v, init + 28, v->patches->gpio.end);
+}
+
+static int patchSlot2Sdk(u8* image, u32 size, u32 ram, const VirtualSlot2Patches* patches) {
+	if (!image || size < 16 || (ram & 3) || !patches || patches->magic != SLOT2_MAGIC)
+		return 0;
+	Slot2PatchContext v = {.data = image, .size = size, .ram = ram, .patches = patches};
+	const u32* start = (const u32*)image;
+	u32* offset;
+	u32 count;
+	int type = 0;
+	bool usesThumb = false;
+	// Module info
+	u32 headerOffset;
+	u32* module = findSlot2InitOffset(start, size, &headerOffset, &usesThumb);
+	if (module) {
+		count = v.count;
+		u32 begin = (u8*)module - image;
+		if (!patchSlot2ModuleInfo(&v, begin, headerOffset, usesThumb))
+			v.count = count;
+	}
+	// Cartridge presence
+	int presence = findSlot2IsExistingOffset(image, size);
+	count = v.count;
+	if (presence >= 0 && !((presence & 1) ? patchThumbJump(&v, ram + (presence & ~1), patches->card.isExisting)
+										  : patchArmJump(&v, ram + presence, patches->card.isExisting)))
+		v.count = count;
+
+	// Copy and access
+	u32* copyOffset;
+	u32* accessOffset;
+	findSlot2CopyOffset(start, size, &copyOffset, &accessOffset);
+	count = v.count;
+	if (copyOffset && !patchArmJump(&v, ram + ((u8*)copyOffset - image), patches->card.copy))
+		v.count = count;
+	count = v.count;
+	if (accessOffset && !patchArmJump(&v, ram + ((u8*)accessOffset - image), patches->card.access))
+		v.count = count;
+
+	// FlashRead
+	offset = findSlot2FlashReadOffset(start, size, &type);
+	count = v.count;
+	if (offset && !patchArmJump(&v, ram + ((u8*)offset - image), patches->card.flash.read[type]))
+		v.count = count;
+
+	// FlashVerify
+	offset = findSlot2FlashVerifyOffset(start, size, &type);
+	count = v.count;
+	if (offset && !patchArmJump(&v, ram + ((u8*)offset - image), patches->card.flash.verify[type]))
+		v.count = count;
+
+	// FlashWriteVerify
+	offset = findSlot2FlashWriteVerifyOffset(start, size, &type);
+	count = v.count;
+	if (offset && !patchArmJump(&v, ram + ((u8*)offset - image), patches->card.flash.writeVerify[type]))
+		v.count = count;
+
+	// SramRead
+	offset = findSlot2SramReadOffset(start, size);
+	count = v.count;
+	if (offset && !patchArmJump(&v, ram + ((u8*)offset - image), patches->card.readSram))
+		v.count = count;
+
+	// Cartridge callback
+	offset = findSlot2PulledCallbackOffset(start, size, &usesThumb);
+	count = v.count;
+	if (offset && !(usesThumb ? patchThumbJump(&v, ram + ((u8*)offset - image), patches->card.pulledCallback)
+							   : patchArmJump(&v, ram + ((u8*)offset - image), patches->card.pulledCallback)))
+		v.count = count;
+	// Flash identify
+	u32* identify = findSlot2FlashIdentifyOffset(start, size);
+	// Flash ID
+	u32* id = findSlot2FlashIdOffset(start, size);
+	// Flash drivers
+	if (identify && id) {
+		count = v.count;
+		u32 setTask = v.setTask;
+		if (!patchSlot2FlashIdentify(&v, (u8*)identify - image, ram + ((u8*)id - image))) {
+			v.count = count;
+			v.setTask = setTask;
+		}
+	}
+	count = v.count;
+	if (!patchSlot2Gpio(&v))
+		v.count = count;
+	for (u32 i = 0; i < v.count; i++) {
+		if (readWord(&v, v.jobs[i].offset) != v.jobs[i].before)
+			return -1;
+	}
+	for (u32 i = 0; i < v.count; i++)
+		*(u32*)(image + v.jobs[i].offset) = v.jobs[i].after;
+	return v.count;
+}
+
+extern u32 iUncompressedSize;
+
+int patchVirtualSlot2(cardengineArm9* ce9, const tNDSHeader* ndsHeader) {
+	if (virtualSlot2Magic != SLOT2_MAGIC || !(virtualSlot2Flags & (SLOT2_ENABLED | SLOT2_EMPTY)))
+		return 0;
+	// B4DS engines use different native patch-table layouts.
+#ifdef B4DS
+	const VirtualSlot2Patches* patches = (const VirtualSlot2Patches*)((u32*)ce9->thumbPatches)[-1];
+#else
+	const VirtualSlot2Patches* patches = (const VirtualSlot2Patches*)ce9->patches->virtualSlot2Patches;
+#endif
+	if (patches && (patches->magic != SLOT2_MAGIC || patches->config < 0x02000000u ||
+					patches->config > 0x03000000u - sizeof(VirtualSlot2Config))) {
+		patches = 0;
+	}
+	int arm7Offset =
+		patches ? findSlot2IsExistingOffset((const u8*)ndsHeader->arm7destination, ndsHeader->arm7binarySize) : -1;
+	int count =
+		patchSlot2Sdk((u8*)ndsHeader->arm9destination, iUncompressedSize, (u32)ndsHeader->arm9destination, patches);
+	if (count <= 0)
+		return 0;
+	/* Patch the loaded source before the game's ARM7 autoloader copies it.
+	 * The MOV/BX stub is independent of that source's final RAM address. */
+	if (arm7Offset >= 0) {
+		u8* presence = (u8*)ndsHeader->arm7destination + (arm7Offset & ~1);
+		const u32 inserted = (virtualSlot2Flags & SLOT2_ENABLED) != 0;
+		if (arm7Offset & 1) {
+			((u16*)presence)[0] = 0x2000 | inserted; // MOV r0, inserted
+			((u16*)presence)[1] = 0x4770; // BX lr
+		} else {
+			((u32*)presence)[0] = 0xE3A00000u | inserted;
+			((u32*)presence)[1] = 0xE12FFF1Eu;
+		}
+	}
+	VirtualSlot2Config* config = (VirtualSlot2Config*)patches->config;
+	config->magic = virtualSlot2Magic;
+	config->flags = virtualSlot2Flags;
+	config->romCluster = virtualSlot2RomCluster;
+	config->saveCluster = virtualSlot2SaveCluster;
+	config->romSize = virtualSlot2RomSize;
+	config->saveSize = virtualSlot2SaveSize;
+	config->saveType = virtualSlot2SaveType;
+	tonccpy(config->header, virtualSlot2Header, sizeof(config->header));
+	dbg_printf("Slot-2: ");
+	dbg_hexa(count);
+	dbg_printf("\n");
+	return 1;
+}
+#endif

@@ -40,10 +40,10 @@ CFLAGS	:=	-g -Wall -O2\
 			$(ARCH)
 
 # ADD -DDEBUG here for logging/debug
-CFLAGS	+=	$(INCLUDE) -DARM7 -DTWOCARD
+CFLAGS	+=	$(INCLUDE) -DVIRTUAL_SLOT2 -DARM7 -DTWOCARD
 CXXFLAGS	:=	$(CFLAGS) -fno-rtti -fno-exceptions
 
-ASFLAGS	:=	-g $(ARCH) $(INCLUDE)
+ASFLAGS	:=	-g $(ARCH) $(INCLUDE) -DVIRTUAL_SLOT2
 LDFLAGS	=	-nostartfiles -T cardengine.ld -g $(ARCH) -Wl,--nmagic -Wl,-Map,$(notdir $*).map
 
 #---------------------------------------------------------------------------------

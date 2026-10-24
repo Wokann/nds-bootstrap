@@ -99,6 +99,33 @@ u32* findNandTmpJumpFuncOffset(const tNDSHeader* ndsHeader, const module_params_
 u32* findTwlSleepModeEndOffset(const tNDSHeader* ndsHeader);
 u32* findSharedFontPathOffset(const tNDSHeader* ndsHeader);
 
+#ifdef LOADERTYPE0
+extern const u32 slot2FlashMakerSignature2[2];
+extern const u32 slot2FlashMakerSignature21[2];
+extern const u32 slot2FlashMakerSignature31[2];
+extern const u32 slot2FlashMakerSignature31Alt[2];
+extern const u32 slot2ModuleInfoHeaderSignature2[2];
+extern const u32 slot2ModuleInfoFinishSignature2[3];
+extern const u16 slot2ModuleInfoHeaderSignatureThumb2[2];
+extern const u16 slot2ModuleInfoEndSignatureThumb2[4];
+extern const u32 slot2ModuleInfoHeaderSignature3[2];
+extern const u32 slot2ModuleInfoFinishSignature3[2];
+extern const u32 slot2ModuleInfoFinishSignature4[2];
+extern const u32 slot2GpioDataSignature31[7];
+extern const u32 slot2GpioInitSignature31[3];
+
+u32* findSlot2InitOffset(const u32* start, u32 size, u32* copyHeaderOffset, bool* usesThumbPtr);
+int findSlot2IsExistingOffset(const u8* image, u32 size);
+void findSlot2CopyOffset(const u32* start, u32 size, u32** copy, u32** access);
+u32* findSlot2FlashReadOffset(const u32* start, u32 size, int* typePtr);
+u32* findSlot2FlashVerifyOffset(const u32* start, u32 size, int* typePtr);
+u32* findSlot2FlashWriteVerifyOffset(const u32* start, u32 size, int* typePtr);
+u32* findSlot2SramReadOffset(const u32* start, u32 size);
+u32* findSlot2PulledCallbackOffset(const u32* start, u32 size, bool* usesThumb);
+u32* findSlot2FlashIdentifyOffset(const u32* start, u32 size);
+u32* findSlot2FlashIdOffset(const u32* start, u32 size);
+#endif
+
 // ARM7
 u32* findWramEndAddrOffset(const tNDSHeader* ndsHeader);
 u32* findWramClearOffset(const tNDSHeader* ndsHeader);

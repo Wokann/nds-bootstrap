@@ -237,6 +237,116 @@ static const char* nandSharedFontSignature = "nand:/<sharedFont>";
 // TODO : could be a good idea to catch the call to Panic function and store the message somewhere
 
 
+// Slot-2 SDK signatures
+#ifdef LOADERTYPE0
+// Common: cartridge presence on ARM9/ARM7.
+static const u32 slot2IsExistingStartSignature2Arm7[3] = {0xE92D4010, 0xE24DD010, 0xE3A04001}; // SDK 2.0/2.1/2.2/3.0/3.1/3.2
+static const u32 slot2IsExistingStartSignature2[3] = {0xE92D4010, 0xE24DD010, 0xE59F20FC}; // SDK 2.0/2.1/2.2/3.0/3.1/3.2
+static const u32 slot2IsExistingStartSignature2Alt[3] = {0xE92D4010, 0xE24DD010, 0xE59F2100}; // SDK 2.0
+static const u16 slot2IsExistingStartSignatureThumb2[4] = {0xB510, 0xB084, 0x2401, 0x4A24}; // SDK 2.0/2.1
+static const u16 slot2IsExistingStartSignatureThumb2Alt[4] = {0xB510, 0xB084, 0x2401, 0x4A25}; // SDK 2.0
+static const u16 slot2IsExistingStartSignatureThumb2Alt2[4] = {0xB510, 0xB084, 0x2401, 0x4A27}; // SDK 2.0/2.1
+static const u16 slot2IsExistingStartSignatureThumb2Alt3[4] = {0xB510, 0xB084, 0x2401, 0x4A28}; // SDK 2.0
+static const u32 slot2IsExistingStartSignature4[3] = {0xE92D4010, 0xE24DD010, 0xE59F20F0}; // SDK 3.0/3.2/4.0/4.1/4.2
+static const u32 slot2IsExistingStartSignature4Alt[3] = {0xE92D4010, 0xE24DD010, 0xE59F2108}; // SDK 4.0/4.1/4.2
+
+// Common: ROM reads and SRAM reads/writes through Copy/Access.
+static const u32 slot2CopyStartSignature2[6] = {0xE92D40F0, 0xE24DD004, 0xE1A07000, 0xE1A06001, 0xE1A05002, 0xE1A04003}; // SDK 2.0/2.1/2.2
+static const u32 slot2CopyCheckSignature2[2] = {0xE59D0018, 0xE2100001}; // SDK 2.0/2.1/2.2
+static const u32 slot2CopyCheckSignature2Alt[2] = {0xE59F0114, 0xE1D000B2}; // SDK 2.2
+static const u32 slot2CopyCheckSignature3[2] = {0xE59F0118, 0xE1D000B2}; // SDK 2.0/2.1/2.2/3.0/3.1/3.2
+static const u32 slot2CopyStartSignature4[5] = {0xE92D40F8, 0xE1A07000, 0xE1A06001, 0xE1A05002, 0xE1A04003}; // SDK 3.0/4.0/4.1/4.2
+static const u32 slot2CopyCheckSignature4[1] = {0xE59F0108}; // SDK 3.0/4.0/4.1/4.2
+static const u32 slot2AccessCheckSignature2[2] = {0xE59F00BC, 0xE1D000B2}; // SDK 2.2
+static const u32 slot2AccessCheckSignature3[1] = {0xE59F00C0}; // SDK 2.2/3.1/3.2
+static const u32 slot2AccessCheckSignature4[1] = {0xE59F00AC}; // SDK 4.1/4.2
+
+// Flash: read.
+static const u32 slot2FlashReadStartSignature2[3] = {0xE92D41F0, 0xE59F60BC, 0xE59F40BC}; // SDK 2.0/3.0
+static const u32 slot2FlashReadStartSignature21Alt[3] = {0xE92D41F0, 0xE59F40BC, 0xE1A08000}; // SDK 2.1/2.2
+static const u32 slot2FlashReadStartSignature21[3] = {0xE92D41F0, 0xE59F40B8, 0xE1A08000}; // SDK 2.2/3.0
+static const u32 slot2FlashReadStartSignature3[9] = {0xE92D41F0, 0xE24DD028, 0xE1A05000, 0xE8B5000F, 0xE28D4000, 0xE8A4000F, 0xE8B5000F, 0xE8A4000F, 0xE59F00CC}; // SDK 3.1/3.2
+static const u32 slot2FlashReadStartSignature4[9] = {0xE92D41F8, 0xE24DD024, 0xE1A05000, 0xE8B5000F, 0xE28D4000, 0xE8A4000F, 0xE8B5000F, 0xE8A4000F, 0xE59F00C0}; // SDK 4.1/4.2
+
+// Flash: verify saved data against a buffer.
+static const u32 slot2FlashVerifyStartSignature21Alt[3] = {0xE92D40F0, 0xE24DD004, 0xE59F30AC}; // SDK 2.1
+static const u32 slot2FlashVerifyStartSignature22[4] = {0xE92D4070, 0xE59F20A8, 0xE1A06000, 0xE1D200B0}; // SDK 2.2
+static const u32 slot2FlashVerifyStartSignature22Alt[4] = {0xE92D4070, 0xE59F20AC, 0xE1A06000, 0xE1D200B0}; // SDK 2.2
+static const u32 slot2FlashVerifyStartSignature21[5] = {0xE92D40F0, 0xE24DD004, 0xE59F30A8, 0xE1A07000, 0xE1D300B0}; // SDK 3.0
+static const u32 slot2FlashVerifyStartSignature3[8] = {0xE92D40F0, 0xE24DD024, 0xE1A05000, 0xE8B5000F, 0xE28D4000, 0xE8A4000F, 0xE8B5000F, 0xE8A4000F}; // SDK 3.1/3.2/4.1/4.2
+static const u32 slot2FlashVerifyCheckSignature3[1] = {0xE59F00B4}; // SDK 3.1/3.2
+static const u32 slot2FlashVerifyCheckSignature4[1] = {0xE59F00A8}; // SDK 4.1/4.2
+
+// SRAM: task-based read; Copy/Access above also handle direct SRAM reads/writes.
+static const u32 slot2SramReadStartSignature3[3] = {0xE92D4010, 0xE24DD028, 0xE1A0C000}; // SDK 3.1
+static const u32 slot2SramReadCheckSignature3[2] = {0xE59D2014, 0xE59D101C}; // SDK 3.1: task offset -> dst, not data -> offset
+
+// Flash: write and verify.
+static const u32 slot2FlashWriteVerifyStartSignature21Alt[6] = {0xE92D41F0, 0xE1A06000, 0xE1A05001, 0xE1A04002, 0xE3A08000, 0xE59F704C}; // SDK 2.1
+static const u32 slot2FlashWriteVerifyStartSignature22[6] = {0xE92D40F0, 0xE24DD004, 0xE1A07000, 0xE1A06001, 0xE3A05000, 0xE59F4048}; // SDK 2.2
+static const u32 slot2FlashWriteVerifyStartSignature22Alt[6] = {0xE92D40F0, 0xE24DD004, 0xE1A07000, 0xE1A06001, 0xE3A05000, 0xE59F4050}; // SDK 2.2
+static const u32 slot2FlashWriteVerifyStartSignature21[6] = {0xE92D41F0, 0xE1A06000, 0xE1A05001, 0xE1A04002, 0xE3A08000, 0xE59F7044}; // SDK 3.0
+static const u32 slot2FlashWriteVerifyStartSignature3[4] = {0xE92D40F0, 0xE24DD024, 0xE1A04000, 0xE8B4000F}; // SDK 3.1/3.2/4.1/4.2
+
+// Flash: read chip ID.
+static const u32 slot2FlashIdStartSignature2Alt[4] = {0xE92D43F0, 0xE24DD004, 0xE59F213C, 0xE3A010AA}; // SDK 2.0/2.1/2.2/3.0
+static const u32 slot2FlashIdStartSignature2[4] = {0xE92D43F0, 0xE24DD004, 0xE59F2138, 0xE3A010AA}; // SDK 2.2/3.0
+static const u32 slot2FlashIdStartSignature3[3] = {0xE92D4030, 0xE24DD004, 0xE59F50F4}; // SDK 3.1/3.2
+static const u32 slot2FlashIdStartSignature4[3] = {0xE92D4038, 0xE59F50EC, 0xE3A00000}; // SDK 4.1/4.2
+
+// Flash: identify the chip and select its write/erase driver table.
+static const u32 slot2FlashIdentifyCheckSignature2[2] = {0xE59F10FC, 0xE59F30FC}; // SDK 2.0/3.0
+static const u32 slot2FlashIdentifyCheckSignature21Alt[2] = {0xE59F10FC, 0xE1C100B0}; // SDK 2.1/2.2
+static const u32 slot2FlashIdentifyStartSignature21[1] = {0xE92D4070}; // SDK 2.2/3.0
+static const u32 slot2FlashIdentifyCheckSignature21[2] = {0xE59F10F8, 0xE1C100B0}; // SDK 2.2/3.0
+static const u32 slot2FlashIdentifyStartSignature3[4] = {0xE92D40F0, 0xE24DD004, 0xE1A07000, 0xE3570001}; // SDK 3.1/3.2
+static const u32 slot2FlashIdentifyStartSignature4[3] = {0xE92D40F8, 0xE1A07000, 0xE3570001}; // SDK 4.1/4.2
+
+// Flash: write/erase driver-table anchors.
+// SDK 2.0: maker +0x28.
+const u32 slot2FlashMakerSignature2[2] = {0xE1D212B8u, 0xE3510000u};
+// SDK 2.1: maker +0x2C.
+const u32 slot2FlashMakerSignature21[2] = {0xE1D212BCu, 0xE3510000u};
+// SDK 3.1/3.2: maker +0x38.
+const u32 slot2FlashMakerSignature31[2] = {0xE1D213B8u, 0xE3510000u};
+const u32 slot2FlashMakerSignature31Alt[2] = {0xE1D313B8u, 0xE3510000u};
+
+// Common: cartridge initialization and ROM header/identity setup.
+static const u32 slot2InitStartSignature2[3] = {0xE92D40F0, 0xE24DD014, 0xE59F0184}; // SDK 2.0/2.1
+static const u16 slot2InitStartSignatureThumb2[4] = {0xB5F0, 0xB085, 0x483A, 0x6801}; // SDK 2.0/2.1
+static const u32 slot2InitStartSignature2Alt2[3] = {0xE92D40F0, 0xE24DD014, 0xE59F0194}; // SDK 2.1/2.2/3.0/3.1
+static const u32 slot2InitStartSignature2Alt[3] = {0xE92D40F0, 0xE24DD014, 0xE59F0188}; // SDK 3.0
+static const u32 slot2InitStartSignature3Alt[3] = {0xE92D40F8, 0xE24DD010, 0xE59F017C}; // SDK 3.0
+static const u32 slot2InitStartSignature2Alt3[3] = {0xE92D40F0, 0xE24DD014, 0xE59F01D8}; // SDK 3.2
+static const u32 slot2InitStartSignature4[3] = {0xE92D40F8, 0xE24DD010, 0xE59F01B8}; // SDK 3.2/4.0/4.1/4.2
+
+/* Common: header-copy and initialization-completion patch sites.
+ * Only these short regions change; the original PXI handshake stays intact. */
+const u32 slot2ModuleInfoHeaderSignature2[2] = {0xE2822080, 0xE3A03040};
+const u32 slot2ModuleInfoFinishSignature2[3] = {0xE28DD014, 0xE8BD40F0, 0xE12FFF1E};
+const u16 slot2ModuleInfoHeaderSignatureThumb2[2] = {0x3280, 0x2340};
+const u16 slot2ModuleInfoEndSignatureThumb2[4] = {0xB005, 0xBCF0, 0xBC08, 0x4718};
+const u32 slot2ModuleInfoHeaderSignature3[2] = {0xE3A03040, 0xE2822080};
+const u32 slot2ModuleInfoFinishSignature3[2] = {0xE28DD014, 0xE8BD80F0};
+const u32 slot2ModuleInfoFinishSignature4[2] = {0xE28DD010, 0xE8BD80F8};
+
+// Common: pulled-cartridge callback.
+static const u32 slot2PulledCallbackStartSignature2[4] = {0xE92D4000, 0xE24DD004, 0xE201003F, 0xE3500011}; // SDK 2.0/2.1/2.2/3.0/3.1/3.2
+static const u32 slot2PulledCallbackCheckSignature2[2] = {0x1A00000D, 0xE59F1040}; // SDK 2.0/2.1/2.2/3.0
+static const u16 slot2PulledCallbackStartSignatureThumb2[6] = {0xB500, 0xB081, 0x203F, 0x4001, 0x2911, 0xD10C}; // SDK 2.0/2.1
+static const u32 slot2PulledCallbackCheckSignature3Alt[2] = {0x1A00000B, 0xE59F1034}; // SDK 3.0
+static const u32 slot2PulledCallbackStartSignature4[3] = {0xE92D4008, 0xE201003F, 0xE3500011}; // SDK 3.0/3.2/4.0/4.1/4.2
+static const u32 slot2PulledCallbackCheckSignature3Alt2[2] = {0x1A000009, 0xE59F1028}; // SDK 3.0
+static const u32 slot2PulledCallbackCheckSignature3[2] = {0x1A000014, 0xE59F005C}; // SDK 3.1/3.2
+static const u32 slot2PulledCallbackCheckSignature4[2] = {0x1A00000F, 0xE59F0040}; // SDK 3.2/4.0/4.1/4.2
+
+/* GPIO: solar-sensor register access observed in SDK 3.1 builds.
+ * Match short I/O regions and paired locks; keep native measurement and ID checks. */
+const u32 slot2GpioDataSignature31[7] = {0xE1D210B0u, 0xE2011008u, 0xE1C010B2u, 0xE1D010B4u, 0xE1CD10B0u, 0xE1DD10B0u, 0xE1C210B0u};
+const u32 slot2GpioInitSignature31[3] = {0xE3A00007u, 0xE1C200B0u, 0xE3A01001u};
+
+#endif
+
 extern u32 iUncompressedSize;
 
 extern bool isPawsAndClaws(const tNDSHeader* ndsHeader);
@@ -2098,6 +2208,275 @@ u16* findFileIoReadOffsetThumb(const u16* fileIoSeekOffset, const module_params_
 	dbg_printf("\n");
 	return offset;
 }
+
+// Slot-2 SDK lookup
+#ifdef LOADERTYPE0
+u32* findSlot2InitOffset(const u32* start, u32 size, u32* copyHeaderOffset, bool* usesThumbPtr) {
+	bool usesThumb = false;
+	u32 headerOffset = 0xA8; // SDK 2.0/2.1
+	u32* module = findOffset(start, size >= 12 ? size - 8 : 0, slot2InitStartSignature2, 3);
+	if (!module) {
+		module = findOffset(start, size >= 12 ? size - 8 : 0, slot2InitStartSignature2Alt, 3);
+		headerOffset = 0xB0; // SDK 3.0
+	}
+	if (!module) {
+		module = findOffset(start, size >= 12 ? size - 8 : 0, slot2InitStartSignature2Alt2, 3);
+		headerOffset = 0xB8; // SDK 2.1/2.2/3.0/3.1
+	}
+	if (!module) {
+		module = findOffset(start, size >= 12 ? size - 8 : 0, slot2InitStartSignature2Alt3, 3);
+		headerOffset = 0xB8; // SDK 3.2
+	}
+	if (!module) {
+		module = findOffset(start, size >= 12 ? size - 8 : 0, slot2InitStartSignature3Alt, 3);
+		headerOffset = 0xB4; // SDK 3.0
+	}
+	if (!module) {
+		module = findOffset(start, size >= 12 ? size - 8 : 0, slot2InitStartSignature4, 3);
+		headerOffset = 0xB0; // SDK 3.2/4.0/4.1/4.2
+	}
+	if (!module) {
+		// Thumb module info
+		u16* moduleThumb =
+			findOffsetThumb((const u16*)start, size >= 8 ? size - 6 : 0, slot2InitStartSignatureThumb2, 4);
+		module = (u32*)moduleThumb;
+		usesThumb = true;
+	}
+	*copyHeaderOffset = headerOffset;
+	*usesThumbPtr = usesThumb;
+	return module;
+}
+
+int findSlot2IsExistingOffset(const u8* image, u32 size) {
+	if (!image || size < 4)
+		return -1;
+	const u32* start = (const u32*)image;
+	// ARM presence
+	u32* offset = findOffset(start, size >= 12 ? size - 8 : 0, slot2IsExistingStartSignature2Arm7, 3);
+	if (!offset) {
+		offset = findOffset(start, size >= 12 ? size - 8 : 0, slot2IsExistingStartSignature4, 3);
+	}
+	if (!offset) {
+		offset = findOffset(start, size >= 12 ? size - 8 : 0, slot2IsExistingStartSignature4Alt, 3);
+	}
+	if (!offset) {
+		offset = findOffset(start, size >= 12 ? size - 8 : 0, slot2IsExistingStartSignature2, 3);
+	}
+	if (!offset) {
+		offset = findOffset(start, size >= 12 ? size - 8 : 0, slot2IsExistingStartSignature2Alt, 3);
+	}
+	if (offset)
+		return (const u8*)offset - image;
+	// Thumb presence
+	u16* offsetThumb =
+		findOffsetThumb((const u16*)start, size >= 8 ? size - 6 : 0, slot2IsExistingStartSignatureThumb2, 4);
+	if (!offsetThumb) {
+		offsetThumb =
+			findOffsetThumb((const u16*)start, size >= 8 ? size - 6 : 0, slot2IsExistingStartSignatureThumb2Alt, 4);
+	}
+	if (!offsetThumb) {
+		offsetThumb =
+			findOffsetThumb((const u16*)start, size >= 8 ? size - 6 : 0, slot2IsExistingStartSignatureThumb2Alt2, 4);
+	}
+	if (!offsetThumb) {
+		offsetThumb =
+			findOffsetThumb((const u16*)start, size >= 8 ? size - 6 : 0, slot2IsExistingStartSignatureThumb2Alt3, 4);
+	}
+	return offsetThumb ? ((const u8*)offsetThumb - image) | 1 : -1;
+}
+
+void findSlot2CopyOffset(const u32* start, u32 size, u32** copy, u32** access) {
+	const u8* image = (const u8*)start;
+	u32* offset;
+	u32* copyOffset = NULL;
+	u32* accessOffset = NULL;
+	offset = findOffset(start, size >= 24 ? size - 20 : 0, slot2CopyStartSignature2, 6);
+	while (offset) {
+		u32 remaining = size - ((const u8*)offset - image);
+		if (!copyOffset && ((remaining >= 64 && findOffset(offset + 11, 4, slot2CopyCheckSignature2Alt, 2) &&
+							findOffset(offset + 14, 4, slot2CopyCheckSignature2, 2)) ||
+							(remaining >= 68 && findOffset(offset + 12, 4, slot2CopyCheckSignature3, 2) &&
+							findOffset(offset + 15, 4, slot2CopyCheckSignature2, 2)) ||
+							(remaining >= 60 && findOffset(offset + 13, 4, slot2CopyCheckSignature3, 2))))
+			copyOffset = offset;
+		if (!accessOffset && ((remaining >= 52 && findOffset(offset + 11, 4, slot2AccessCheckSignature2, 2)) ||
+							  (remaining >= 56 && findOffset(offset + 12, 8, slot2AccessCheckSignature3, 1))))
+			accessOffset = offset;
+		if (copyOffset && accessOffset)
+			break;
+		offset = findOffset(offset + 1, remaining >= 28 ? remaining - 24 : 0, slot2CopyStartSignature2, 6);
+	}
+	if (!copyOffset || !accessOffset) {
+		offset = findOffset(start, size >= 20 ? size - 16 : 0, slot2CopyStartSignature4, 5);
+		while (offset) {
+			u32 remaining = size - ((const u8*)offset - image);
+			if (remaining >= 44) {
+				if (!copyOffset && findOffset(offset + 10, 4, slot2CopyCheckSignature4, 1))
+					copyOffset = offset;
+				if (!accessOffset && findOffset(offset + 10, 4, slot2AccessCheckSignature4, 1))
+					accessOffset = offset;
+			}
+			if (copyOffset && accessOffset)
+				break;
+			offset = findOffset(offset + 1, remaining >= 24 ? remaining - 20 : 0, slot2CopyStartSignature4, 5);
+		}
+	}
+	*copy = copyOffset;
+	*access = accessOffset;
+}
+
+u32* findSlot2FlashReadOffset(const u32* start, u32 size, int* typePtr) {
+	u32* offset;
+	int type;
+	type = 1;
+	offset = findOffset(start, size >= 36 ? size - 32 : 0, slot2FlashReadStartSignature3, 9);
+	if (!offset) {
+		offset = findOffset(start, size >= 36 ? size - 32 : 0, slot2FlashReadStartSignature4, 9);
+	}
+	if (!offset) {
+		type = 0;
+		offset = findOffset(start, size >= 12 ? size - 8 : 0, slot2FlashReadStartSignature21, 3);
+		if (!offset) {
+			offset = findOffset(start, size >= 12 ? size - 8 : 0, slot2FlashReadStartSignature21Alt, 3);
+		}
+		if (!offset) {
+			offset = findOffset(start, size >= 12 ? size - 8 : 0, slot2FlashReadStartSignature2, 3);
+		}
+	}
+	*typePtr = type;
+	return offset;
+}
+
+u32* findSlot2FlashVerifyOffset(const u32* start, u32 size, int* typePtr) {
+	const u8* image = (const u8*)start;
+	u32* offset;
+	int type;
+	type = 1;
+	offset = findOffset(start, size >= 32 ? size - 28 : 0, slot2FlashVerifyStartSignature3, 8);
+	while (offset) {
+		u32 remaining = size - ((const u8*)offset - image);
+		if (remaining >= 36 && (findOffset(offset + 8, 4, slot2FlashVerifyCheckSignature3, 1) ||
+								findOffset(offset + 8, 4, slot2FlashVerifyCheckSignature4, 1)))
+			break;
+		offset = findOffset(offset + 1, remaining >= 36 ? remaining - 32 : 0, slot2FlashVerifyStartSignature3, 8);
+	}
+	if (!offset) {
+		type = 2;
+		offset = findOffset(start, size >= 16 ? size - 12 : 0, slot2FlashVerifyStartSignature22, 4);
+		if (!offset) {
+			offset = findOffset(start, size >= 16 ? size - 12 : 0, slot2FlashVerifyStartSignature22Alt, 4);
+		}
+	}
+	if (!offset) {
+		type = 0;
+		offset = findOffset(start, size >= 20 ? size - 16 : 0, slot2FlashVerifyStartSignature21, 5);
+		if (!offset) {
+			offset = findOffset(start, size >= 12 ? size - 8 : 0, slot2FlashVerifyStartSignature21Alt, 3);
+		}
+	}
+	*typePtr = type;
+	return offset;
+}
+
+u32* findSlot2FlashWriteVerifyOffset(const u32* start, u32 size, int* typePtr) {
+	u32* offset;
+	int type;
+	type = 1;
+	offset = findOffset(start, size >= 16 ? size - 12 : 0, slot2FlashWriteVerifyStartSignature3, 4);
+	if (!offset) {
+		type = 2;
+		offset = findOffset(start, size >= 24 ? size - 20 : 0, slot2FlashWriteVerifyStartSignature22, 6);
+		if (!offset) {
+			offset = findOffset(start, size >= 24 ? size - 20 : 0, slot2FlashWriteVerifyStartSignature22Alt, 6);
+		}
+	}
+	if (!offset) {
+		type = 0;
+		offset = findOffset(start, size >= 24 ? size - 20 : 0, slot2FlashWriteVerifyStartSignature21, 6);
+		if (!offset) {
+			offset = findOffset(start, size >= 24 ? size - 20 : 0, slot2FlashWriteVerifyStartSignature21Alt, 6);
+		}
+	}
+	*typePtr = type;
+	return offset;
+}
+
+u32* findSlot2SramReadOffset(const u32* start, u32 size) {
+	u32* offset = findOffset(start, size >= 12 ? size - 8 : 0, slot2SramReadStartSignature3, 3);
+	while (offset) {
+		u32 remaining = size - ((const u8*)offset - (const u8*)start);
+		if (remaining >= 0x64 && findOffset(offset + 23, 4, slot2SramReadCheckSignature3, 2))
+			break;
+		offset = findOffset(offset + 1, remaining >= 16 ? remaining - 12 : 0, slot2SramReadStartSignature3, 3);
+	}
+	return offset;
+}
+
+u32* findSlot2PulledCallbackOffset(const u32* start, u32 size, bool* usesThumb) {
+	const u8* image = (const u8*)start;
+	u32* offset;
+	*usesThumb = false;
+	// Shared fixed entries plus their adjacent check distinguish Slot-1's tag-0x11 callback.
+	offset = findOffset(start, size >= 16 ? size - 12 : 0, slot2PulledCallbackStartSignature2, 4);
+	while (offset) {
+		u32 remaining = size - ((const u8*)offset - image);
+		if (remaining >= 24 && (findOffset(offset + 4, 4, slot2PulledCallbackCheckSignature2, 2) ||
+								findOffset(offset + 4, 4, slot2PulledCallbackCheckSignature3, 2) ||
+								findOffset(offset + 4, 4, slot2PulledCallbackCheckSignature3Alt, 2)))
+			break;
+		offset = findOffset(offset + 1, remaining >= 20 ? remaining - 16 : 0, slot2PulledCallbackStartSignature2, 4);
+	}
+	if (!offset) {
+		offset = findOffset(start, size >= 12 ? size - 8 : 0, slot2PulledCallbackStartSignature4, 3);
+		while (offset) {
+			u32 remaining = size - ((const u8*)offset - image);
+			if (remaining >= 20 && (findOffset(offset + 3, 4, slot2PulledCallbackCheckSignature4, 2) ||
+									findOffset(offset + 3, 4, slot2PulledCallbackCheckSignature3Alt2, 2)))
+				break;
+			offset =
+				findOffset(offset + 1, remaining >= 16 ? remaining - 12 : 0, slot2PulledCallbackStartSignature4, 3);
+		}
+	}
+	if (offset)
+		return offset;
+	*usesThumb = true;
+	return (u32*)findOffsetThumb((const u16*)start, size >= 12 ? size - 10 : 0, slot2PulledCallbackStartSignatureThumb2, 6);
+}
+
+u32* findSlot2FlashIdentifyOffset(const u32* start, u32 size) {
+	u32* identify = findOffset(start, size >= 4 ? size - 0 : 0, slot2FlashIdentifyStartSignature21, 1);
+	while (identify) {
+		u32 remaining = size - ((const u8*)identify - (const u8*)start);
+		if ((remaining >= 16 && findOffset(identify + 2, 4, slot2FlashIdentifyCheckSignature21, 2)) ||
+			(remaining >= 16 && findOffset(identify + 2, 4, slot2FlashIdentifyCheckSignature21Alt, 2)) ||
+			(remaining >= 16 && findOffset(identify + 2, 4, slot2FlashIdentifyCheckSignature2, 2))) {
+			break;
+		}
+		identify = findOffset(identify + 1, remaining >= 8 ? remaining - 4 : 0, slot2FlashIdentifyStartSignature21, 1);
+	}
+	if (!identify) {
+		identify = findOffset(start, size >= 16 ? size - 12 : 0, slot2FlashIdentifyStartSignature3, 4);
+	}
+	if (!identify) {
+		identify = findOffset(start, size >= 12 ? size - 8 : 0, slot2FlashIdentifyStartSignature4, 3);
+	}
+	return identify;
+}
+
+u32* findSlot2FlashIdOffset(const u32* start, u32 size) {
+	u32* id = findOffset(start, size >= 12 ? size - 8 : 0, slot2FlashIdStartSignature3, 3);
+	if (!id) {
+		id = findOffset(start, size >= 12 ? size - 8 : 0, slot2FlashIdStartSignature4, 3);
+	}
+	if (!id) {
+		id = findOffset(start, size >= 16 ? size - 12 : 0, slot2FlashIdStartSignature2, 4);
+	}
+	if (!id) {
+		id = findOffset(start, size >= 16 ? size - 12 : 0, slot2FlashIdStartSignature2Alt, 4);
+	}
+	return id;
+}
+#endif
 
 u32* findCardEndReadDmaSdk5(const tNDSHeader* ndsHeader, const module_params_t* moduleParams, bool usesThumb) {
 	dbg_printf("findCardEndReadDmaSdk5\n");

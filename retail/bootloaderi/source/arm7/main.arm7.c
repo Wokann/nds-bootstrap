@@ -66,6 +66,8 @@
 #include "dldi_patcher.h"
 #include "ips.h"
 #include "patch.h"
+#include "virtual_slot2.h"
+#include "load_crt0.h"
 #include "find.h"
 #include "hook.h"
 #include "common.h"
@@ -98,12 +100,8 @@ extern u8 saveRelocation;
 extern u16 a9ScfgRom;
 extern u8 dsiSD;
 extern u32 saveFileCluster;
-extern u32 gbaFileCluster;
-extern u32 gbaSaveFileCluster;
 extern u32 romSize;
 extern u32 saveSize;
-// extern u32 gbaRomSize;
-// extern u32 gbaSaveSize;
 extern u32 dataToPreloadAddr[4];
 extern u32 dataToPreloadSize[4];
 // extern u32 dataToPreloadFrame;
@@ -149,7 +147,6 @@ bool i2cBricked = false;
 u32 aesKey1[4] = {0};
 u32 aesKey2[4] = {0};
 
-//bool gbaRomFound = false;
 
 u32 ce7Location = CARDENGINEI_ARM7_LOCATION;
 u32 ce9Location = CARDENGINEI_ARM9_LOCATION;
@@ -1617,6 +1614,9 @@ bool buttonsRemapped(void) {
 
 int arm7_main(void) {
 	nocashMessage("bootloader");
+	const bool virtualSlot2OnFlashcard = virtualSlot2Magic == SLOT2_MAGIC
+		&& (virtualSlot2Flags & SLOT2_ENABLED)
+		&& (virtualSlot2Flags & (SLOT2_ROM_ON_FLASHCARD | SLOT2_SAVE_ON_FLASHCARD));
 
 	initMBK();
 
@@ -1638,7 +1638,7 @@ int arm7_main(void) {
 		}
 	}
 
-	if (gameOnFlashcard || saveOnFlashcard) {
+	if (gameOnFlashcard || saveOnFlashcard || virtualSlot2OnFlashcard) {
 		// Init Slot-1 card
 		if (!FAT_InitFiles(initDisc, true)) {
 			nocashMessage("!FAT_InitFiles");
@@ -2197,27 +2197,9 @@ int arm7_main(void) {
 			toncset((char*)0x0C3E00C0, 0, 0xE);
 			*(u16*)0x0C3E00CE = 0x7FFF;
 			toncset((char*)0x0C3E00D0, 0, 0x130);
-		} /*else // GBA file
-		if (!dsiModeConfirmed && !isSdk5(moduleParams)) {
-			aFile* gbaFile = (aFile*)(dsiEnhancedMbk ? GBA_FILE_LOCATION_ALT : GBA_FILE_LOCATION);
-			*gbaFile = getFileFromCluster(gbaFileCluster);
-			aFile* gbaSavFile = (aFile*)(dsiEnhancedMbk ? GBA_SAV_FILE_LOCATION_ALT : GBA_SAV_FILE_LOCATION);
-			*gbaSavFile = getFileFromCluster(gbaSaveFileCluster);
-			gbaRomFound = (gbaFile->firstCluster != CLUSTER_FREE);
-			//patchSlot2Addr(ndsHeader);
+		}
 
-			tonccpy((char*)GBA_FILE_LOCATION_MAINMEM, gbaFile, sizeof(aFile));
-			tonccpy((char*)GBA_SAV_FILE_LOCATION_MAINMEM, gbaSavFile, sizeof(aFile));
-
-			if (gbaRomFound) {
-				fileRead((char*)0x027FFC30, *gbaFile, 0xBE, 2, -1);
-				fileRead((char*)0x027FFC32, *gbaFile, 0xB5, 3, -1);
-				fileRead((char*)0x027FFC36, *gbaFile, 0xB0, 2, -1);
-				fileRead((char*)0x027FFC38, *gbaFile, 0xAC, 4, -1);
-			}
-		}*/
-
-		if (!bootstrapOnFlashcard && !gameOnFlashcard && !saveOnFlashcard && REG_SCFG_EXT != 0 && !(REG_SCFG_MC & BIT(0))) {
+		if (!bootstrapOnFlashcard && !gameOnFlashcard && !saveOnFlashcard && !virtualSlot2OnFlashcard && REG_SCFG_EXT != 0 && !(REG_SCFG_MC & BIT(0))) {
 			if (specialCard || saveRelocation == FALSE) {
 				// Enable Slot-1 for games that use IR
 				my_enableSlot1();
@@ -2268,7 +2250,7 @@ int arm7_main(void) {
 
 		// dbg_printf("Trying to patch the card...\n");
 
-		const u16 ce9size = (ROMsupportsDsiMode(&dsiHeaderTemp.ndshdr) && dsiModeConfirmed) ? 0x3800 : 0x2FA0;
+		const u16 ce9size = (ROMsupportsDsiMode(&dsiHeaderTemp.ndshdr) && dsiModeConfirmed) ? 0x3800 : 0x3FA0;
 		ce7Location = *(u32*)CARDENGINEI_ARM7_BUFFERED_LOCATION;
 		u32 ce7Size = 0xF800;
 
@@ -2299,7 +2281,7 @@ int arm7_main(void) {
 		}
 
 		tonccpy((u32*)ce7Location, (u32*)CARDENGINEI_ARM7_BUFFERED_LOCATION, ce7Size);
-		if (gameOnFlashcard || saveOnFlashcard) {
+		if (gameOnFlashcard || saveOnFlashcard || virtualSlot2OnFlashcard) {
 			if (!dldiPatchBinary((data_t*)ce7Location, ce7Size-0x400, (data_t*)((ROMsupportsDsiMode(ndsHeader) && dsiModeConfirmed) ? 0 : (dsiEnhancedMbk ? CARDENGINEI_ARM7_LOCATION_ALT_DLDI : CARDENGINEI_ARM7_LOCATION_DLDI)))) {
 				dbg_printf("ce7 DLDI patch failed\n");
 				errorOutput();

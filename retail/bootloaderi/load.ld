@@ -181,6 +181,7 @@ SECTIONS
 
 	__bss_end = . ;
 	__bss_end__ = . ;
+	ASSERT(__bss_end__ <= __sp_usr - 0x3000, "Virtual Slot-2 loader needs 12KB stack headroom")
 
 	_end = . ;
 	__end__ = . ;

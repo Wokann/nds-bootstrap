@@ -38,7 +38,6 @@ u16 patchOffsetCacheFileNewCrc = 0;
 
 patchOffsetCacheContents patchOffsetCache;
 
-extern bool gbaRomFound;
 extern bool scfgSdmmcEnabled;
 extern u8 dsiSD;
 extern bool i2cBricked;
@@ -17414,95 +17413,6 @@ void patchBinary(cardengineArm9* ce9, const tNDSHeader* ndsHeader, module_params
 	}
 } */
 
-/*void patchSlot2Addr(const tNDSHeader* ndsHeader) {
-	extern u32 gbaAddrToDsi[];
-
-	if (!gbaRomFound) {
-		return;
-	}
-
-	const char* romTid = getRomTid(ndsHeader);
-
-	if (strcmp(romTid, "ARZE") == 0) {	// MegaMan ZX
-		for (u32 addr = 0x0203740C; addr <= 0x02044790; addr += 4) {
-			if (*(u32*)addr >= 0x08000000 && *(u32*)addr < 0x08020000) {
-				*(u32*)addr += 0x05000000;
-			}
-		}
-		*(u32*)0x0203A260 = 0x0D000800;	// Originally 0xC000800, for some weird reason
-		*(u32*)0x0203A708 = 0x0D000800;	// Originally 0xC000800, for some weird reason
-		*(u32*)0x0203AFC0 = 0x0D000800;	// Originally 0xC000800, for some weird reason
-		*(u32*)0x0203C178 = 0x0D010001;	// Originally 0xC010001, for some weird reason
-		*(u32*)0x0203D448 = 0x0D010001;	// Originally 0xC010001, for some weird reason
-		*(u32*)0x0203D678 = 0x0D000800;	// Originally 0xC000800, for some weird reason
-		*(u32*)0x02041D64 = 0x0D010000;	// Originally 0xC010000, for some weird reason
-		for (u32 addr = 0x020CA234; addr <= 0x020CA2C0; addr += 4) {
-			*(u32*)addr += 0x05000000;
-		}
-		return;
-	}
-
-	else if (strcmp(romTid, "CPUE") == 0 && ndsHeader->romversion == 0) {	// Pokemon Platinum Version
-		*(u32*)0x020D0A60 = gbaAddrToDsi[0];
-		*(u32*)0x020D0AA8 = gbaAddrToDsi[0];
-		*(u32*)0x020D0B0C = 0x0D0000CE;
-		*(u32*)0x020D0C68 = gbaAddrToDsi[1];
-		*(u32*)0x020D0CB0 = 0x02610000;
-		*(u32*)0x020D1248 = 0x0D000080;
-		*(u32*)0x020D14D4 = gbaAddrToDsi[2];
-		*(u32*)0x020D14E0 = 0x02605555;
-		*(u32*)0x020D14E4 = 0x02602AAA;
-		*(u32*)0x020D1560 = gbaAddrToDsi[3];
-		*(u32*)0x020D15E8 = 0x02605555;
-		*(u32*)0x020D15EC = 0x02602AAA;
-		*(u32*)0x020D15F0 = 0x02600001;
-		*(u32*)0x020D172C = 0x02605555;
-		*(u32*)0x020D17E0 = 0x02605555;
-		*(u32*)0x020D1880 = gbaAddrToDsi[4];
-		*(u32*)0x020D1884 = gbaAddrToDsi[5];
-		*(u32*)0x020D19A4 = gbaAddrToDsi[6];
-		*(u32*)0x020D19A8 = gbaAddrToDsi[7];
-		*(u32*)0x020D1B90 = gbaAddrToDsi[2];
-		*(u32*)0x020D1BDC = 0x02605555;
-		*(u32*)0x020D1BE0 = 0x02602AAA;
-		*(u32*)0x020D1C20 = gbaAddrToDsi[8];
-		*(u32*)0x020D1C24 = gbaAddrToDsi[9];
-		*(u32*)0x020D1D00 = 0x02605555;
-		*(u32*)0x020D1D04 = 0x02602AAA;
-		*(u32*)0x020D1E4C = gbaAddrToDsi[10];
-		*(u32*)0x020D1E50 = gbaAddrToDsi[11];
-		*(u32*)0x020D1EC4 = 0x02605555;
-		*(u32*)0x020D1EC8 = 0x02602AAA;
-		*(u32*)0x020D21A4 = gbaAddrToDsi[2];
-		*(u32*)0x020D21F0 = 0x02605555;
-		*(u32*)0x020D21F4 = 0x02602AAA;
-		*(u32*)0x020D22B0 = gbaAddrToDsi[12];
-		*(u32*)0x020D22B4 = gbaAddrToDsi[13];
-		*(u32*)0x020D2324 = 0x02605555;
-		*(u32*)0x020D2328 = 0x02602AAA;
-		*(u32*)0x020D2378 = 0x02605555;
-		*(u32*)0x020D237C = 0x02602AAA;
-		*(u32*)0x020D23DC = gbaAddrToDsi[14];
-		*(u32*)0x020D23E0 = gbaAddrToDsi[15];
-		*(u32*)0x020D2784 = gbaAddrToDsi[2];
-		*(u32*)0x020D27D0 = 0x02605555;
-		*(u32*)0x020D27D4 = 0x02602AAA;
-		*(u32*)0x020D28CC = gbaAddrToDsi[6];
-		*(u32*)0x020D28D0 = gbaAddrToDsi[7];
-		*(u32*)0x020D2954 = 0x02605555;
-		*(u32*)0x020D295C = 0x02602AAA;
-		*(u32*)0x020D29Ac = 0x02605555;
-		*(u32*)0x020D29B0 = 0x02602AAA;
-		*(u32*)0x020D2A90 = gbaAddrToDsi[16];
-		*(u32*)0x020D2A94 = gbaAddrToDsi[17];
-		*(u32*)0x020D2CC4 = gbaAddrToDsi[18];
-		*(u32*)0x020D2CC8 = gbaAddrToDsi[19];
-		return;
-	}
-
-	gbaRomFound = false;	// Do not load GBA ROM
-}*/
-
 void rsetA7Cache(void)
 {
 	patchOffsetCache.a7BinSize = 0;
@@ -17561,7 +17471,11 @@ u32 patchCardNds(
 	u32 errorCodeArm9 = patchCardNdsArm9(ce9, ndsHeader, moduleParams, ltdModuleParams, ROMinRAM, patchMpuRegion, usesCloneboot, buttonsRemapped);
 
 	if (errorCodeArm9 == ERR_NONE || ndsHeader->fatSize == 0) {
-		return patchCardNdsArm7(ce7, ndsHeader, moduleParams, ROMinRAM, saveFileCluster, saveSize, buttonsRemapped);
+		u32 errorCodeArm7 = patchCardNdsArm7(ce7, ndsHeader, moduleParams, ROMinRAM, saveFileCluster, saveSize, buttonsRemapped);
+#ifdef LOADERTYPE0
+		if (errorCodeArm7 == ERR_NONE) patchVirtualSlot2(ce9, ndsHeader);
+#endif
+		return errorCodeArm7;
 	}
 
 	return ERR_LOAD_OTHR;

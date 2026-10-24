@@ -101,11 +101,6 @@ typedef struct patchOffsetCacheContents {
     u32* cardSetDmaOffset;
     u32* cardEndReadDmaOffset;
     u32 dmaHandlerOffset;
-    /*u32* cartExistOffset;
-    u32 cartExistOffsetChecked;
-    u32* cartInfoInitConstantOffset;
-    u32* cartReadOffset;
-    u32 cartReadOffsetChecked;*/
 	u32* waitSysCyclesOffset;
 	u32* fileIoOpenOffset;
 	u32* fileIoCloseOffset;
@@ -185,7 +180,9 @@ void codeCopy(u32* dst, u32* src, u32 len);
 void dsiWarePatch(cardengineArm9* ce9, const tNDSHeader* ndsHeader);
 void patchBinary(cardengineArm9* ce9, const tNDSHeader* ndsHeader, module_params_t* moduleParams);
 // void bannerSavPatch(const tNDSHeader* ndsHeader);
-// void patchSlot2Addr(const tNDSHeader* ndsHeader);
+#ifdef LOADERTYPE0
+int patchVirtualSlot2(cardengineArm9* ce9, const tNDSHeader* ndsHeader);
+#endif
 u32 patchCardNdsArm9(
 	cardengineArm9* ce9,
 	const tNDSHeader* ndsHeader,

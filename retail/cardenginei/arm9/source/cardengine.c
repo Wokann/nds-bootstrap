@@ -38,6 +38,7 @@
 #include "locations.h"
 #include "cardengine_header_arm9.h"
 #include "unpatched_funcs.h"
+#include "virtual_slot2.h"
 
 #define saveOnFlashcard BIT(0)
 #define ROMinRAM BIT(1)
@@ -119,8 +120,6 @@ aFile* romFile = (aFile*)ROM_FILE_LOCATION_MAINMEM;
 aFile* savFile = (aFile*)SAV_FILE_LOCATION_MAINMEM;
 aFile* apFixOverlaysFile = (aFile*)OVL_FILE_LOCATION_MAINMEM;
 #endif // TWLSDK
-//static aFile* gbaFile = (aFile*)GBA_FILE_LOCATION_MAINMEM;
-//static aFile* gbaSavFile = (aFile*)GBA_SAV_FILE_LOCATION_MAINMEM;
 #ifndef DLDI
 //static u32 sdatAddr = 0;
 //static u32 sdatSize = 0;
@@ -1529,15 +1528,87 @@ void initMBKARM9_dsiMode(void) {
 }
 #endif
 
-/*u32 cartRead(u32 dma, u32 src, u8* dst, u32 len, u32 type) {
-	if (src >= 0x02000000 ? (gbaSavFile->firstCluster == CLUSTER_FREE) : (gbaFile->firstCluster == CLUSTER_FREE)) {
-		return false;
+// Virtual Slot-2 files use the existing FAT and ARM7 IPC paths.
+#ifdef VIRTUAL_SLOT2
+int virtualSlot2Transfer(u32 op, u32 offset, void *buffer, u32 len) {
+#ifndef TWLSDK
+	initialize();
+#endif
+	const int oldIME = enterCriticalSection();
+	const u16 exmemcnt = REG_EXMEMCNT;
+#ifdef DLDI
+	if ((virtualSlot2Config9.flags & SLOT2_ROM_ON_FLASHCARD)
+	 && (!virtualSlot2Config9.saveCluster || (virtualSlot2Config9.flags & SLOT2_SAVE_ON_FLASHCARD))) {
+		sysSetCardOwner(BUS_OWNER_ARM9);
+		if (!driveInitialized) {
+			if (!FAT_InitFiles(false)) {
+				REG_EXMEMCNT = exmemcnt;
+				leaveCriticalSection(oldIME);
+				return 0;
+			}
+			driveInitialized = true;
+		}
+		const int result = virtualSlot2FileIO(&virtualSlot2Config9, op, offset, buffer, len);
+		REG_EXMEMCNT = exmemcnt;
+		leaveCriticalSection(oldIME);
+		return result;
 	}
-
-	fileRead(dst, src >= 0x02000000 ? *gbaSavFile : *gbaFile, src, len, 0);
-	return true;
-	return 0;
-}*/
+#endif
+	static VirtualSlot2Request request __attribute__((aligned(32)));
+	static u8 transferBuffer[512] __attribute__((aligned(32)));
+	/* ARM7 cannot see ARM9 TCM/VRAM. Isolate cache maintenance to this
+	 * aligned main-RAM buffer, then copy to/from the caller on ARM9. */
+	if (op == VIRTUAL_SLOT2_FLASH_PROGRAM) {
+		if (len != GBA_FLASH_SECTOR_SIZE
+		 || (virtualSlot2Config9.saveType != GBA_SAVE_FLASH512
+		  && virtualSlot2Config9.saveType != GBA_SAVE_FLASH1M)
+		 || offset >= virtualSlot2Config9.saveSize / GBA_FLASH_SECTOR_SIZE) {
+			leaveCriticalSection(oldIME); return 0;
+		}
+		offset *= GBA_FLASH_SECTOR_SIZE;
+		op = VIRTUAL_SLOT2_SAVE_WRITE;
+	}
+	const bool reading = op == VIRTUAL_SLOT2_ROM_READ || op == VIRTUAL_SLOT2_SAVE_READ;
+	const bool moving = reading || op == VIRTUAL_SLOT2_SAVE_WRITE;
+	const u32 size = op == VIRTUAL_SLOT2_ROM_READ ? virtualSlot2Config9.romSize : virtualSlot2Config9.saveSize;
+	if ((moving && !buffer && len) || offset > size || len > size - offset) {
+		leaveCriticalSection(oldIME); return 0;
+	}
+	/* ARM7 continues servicing IPC while ARM9 interrupts are disabled. */
+	while (sharedAddr[3]) { IPC_SendSync(0x4); swiDelay(32); }
+	/* FAT binding may initialize both backing volumes on the first request. */
+	sysSetCardOwner(BUS_OWNER_ARM7);
+	request.config = virtualSlot2Config9;
+	request.operation = op;
+	int result;
+	u32 done = 0;
+	do {
+		u32 n = len - done;
+		if (moving && n > sizeof(transferBuffer)) n = sizeof(transferBuffer);
+		if (moving && !reading && n) tonccpy(transferBuffer, (u8*)buffer + done, n);
+		if (moving) DC_FlushRange(transferBuffer, sizeof(transferBuffer));
+		request.offset = offset + done;
+		request.length = n;
+		request.buffer = moving ? (uint32_t)transferBuffer : 0;
+		DC_FlushRange(&request, sizeof(request));
+		sharedAddr[0] = (uint32_t)&request;
+		sharedAddr[4] = 0;
+		sharedAddr[3] = SLOT2_IPC_COMMAND;
+		IPC_SendSync(0x4);
+		while (sharedAddr[3]) { IPC_SendSync(0x4); swiDelay(32); }
+		result = sharedAddr[4] == 1;
+		if (!result) break;
+		if (reading) {
+			DC_InvalidateRange(transferBuffer, sizeof(transferBuffer));
+			if (n) tonccpy((u8*)buffer + done, transferBuffer, n);
+		}
+		done += n;
+	} while (done < len);
+	REG_EXMEMCNT = exmemcnt;
+	leaveCriticalSection(oldIME);
+	return result;
+}
+#endif
 
 extern void reset(u32 param, u32 tid2);
 

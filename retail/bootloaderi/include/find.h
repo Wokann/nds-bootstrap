@@ -100,9 +100,33 @@ u16* findFileIoSeekOffsetThumb(const u16* fileIoCloseOffset);
 u32* findFileIoReadOffset(const u32* fileIoSeekOffset, const module_params_t* moduleParams);
 u16* findFileIoReadOffsetThumb(const u16* fileIoSeekOffset, const module_params_t* moduleParams);
 u32* findStrmPageLoadOffset(const tNDSHeader* ndsHeader, const module_params_t* moduleParams);
-u32* findCartInfoInitConstantOffset(const tNDSHeader* ndsHeader, const module_params_t* moduleParams, bool usesThumb);
-u32* findCartExistOffset(const tNDSHeader* ndsHeader, bool usesThumb);
-u32* findCartReadOffset(const tNDSHeader* ndsHeader, bool usesThumb);
+#ifdef LOADERTYPE0
+extern const u32 slot2FlashMakerSignature2[2];
+extern const u32 slot2FlashMakerSignature21[2];
+extern const u32 slot2FlashMakerSignature31[2];
+extern const u32 slot2FlashMakerSignature31Alt[2];
+extern const u32 slot2ModuleInfoHeaderSignature2[2];
+extern const u32 slot2ModuleInfoFinishSignature2[3];
+extern const u16 slot2ModuleInfoHeaderSignatureThumb2[2];
+extern const u16 slot2ModuleInfoEndSignatureThumb2[4];
+extern const u32 slot2ModuleInfoHeaderSignature3[2];
+extern const u32 slot2ModuleInfoFinishSignature3[2];
+extern const u32 slot2ModuleInfoFinishSignature4[2];
+extern const u32 slot2GpioDataSignature31[7];
+extern const u32 slot2GpioInitSignature31[3];
+
+u32* findSlot2InitOffset(const u32* start, u32 size, u32* copyHeaderOffset, bool* usesThumbPtr);
+int findSlot2IsExistingOffset(const u8* image, u32 size);
+void findSlot2CopyOffset(const u32* start, u32 size, u32** copy, u32** access);
+u32* findSlot2FlashReadOffset(const u32* start, u32 size, int* typePtr);
+u32* findSlot2FlashVerifyOffset(const u32* start, u32 size, int* typePtr);
+u32* findSlot2FlashWriteVerifyOffset(const u32* start, u32 size, int* typePtr);
+u32* findSlot2SramReadOffset(const u32* start, u32 size);
+u32* findSlot2PulledCallbackOffset(const u32* start, u32 size, bool* usesThumb);
+u32* findSlot2FlashIdentifyOffset(const u32* start, u32 size);
+u32* findSlot2FlashIdOffset(const u32* start, u32 size);
+#endif
+
 u32* findWaitCpuCyclesOffset(const tNDSHeader* ndsHeader);
 u32* findWaitSysCyclesOffset(const tNDSHeader* ndsHeader);
 u32* findSleepOffset(const tNDSHeader* ndsHeader, const module_params_t* moduleParams, bool usesThumb, u8* usesThumbPtr);

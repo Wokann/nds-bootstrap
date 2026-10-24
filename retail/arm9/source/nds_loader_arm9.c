@@ -235,7 +235,7 @@ static bool dldiPatchLoader (data_t *binData, u32 binSize, bool clearBSS, bool a
 	return true;
 }
 
-int runNds(u32 cluster, u32 saveCluster, u32 donorTwlCluster, /* u32 gbaCluster, u32 gbaSavCluster, */ u32 quitCluster, u32 wideCheatCluster, u32 apPatchCluster, u32 apPatchPostCardReadCluster, u32 dsi2dsSavePatchCluster, u32 cheatCluster, u32 patchOffsetCacheCluster, u32 ramDumpCluster, u32 srParamsCluster, u32 screenshotCluster, u32 apFixOverlaysCluster, u32 musicCluster, u32 pageFileCluster, u32 manualCluster, u32 sharedFontCluster, configuration* conf) {
+int runNds(u32 cluster, u32 saveCluster, u32 donorTwlCluster, u32 virtualSlot2RomCluster, u32 virtualSlot2SaveCluster, u32 quitCluster, u32 wideCheatCluster, u32 apPatchCluster, u32 apPatchPostCardReadCluster, u32 dsi2dsSavePatchCluster, u32 cheatCluster, u32 patchOffsetCacheCluster, u32 ramDumpCluster, u32 srParamsCluster, u32 screenshotCluster, u32 apFixOverlaysCluster, u32 musicCluster, u32 pageFileCluster, u32 manualCluster, u32 sharedFontCluster, configuration* conf) {
 	nocashMessage("runNds");
 
 	// Load bootloader binary
@@ -279,12 +279,12 @@ int runNds(u32 cluster, u32 saveCluster, u32 donorTwlCluster, /* u32 gbaCluster,
 	loader->donorFileCluster            = donorTwlCluster;
 	loader->donorFileSize               = conf->donorFileSize;
 	loader->donorFileOffset             = conf->donorFileOffset;
-	// loader->gbaFileCluster              = gbaCluster;
-	// loader->gbaSaveFileCluster          = gbaSavCluster;
+	loader->virtualSlot2RomCluster      = virtualSlot2RomCluster;
+	loader->virtualSlot2SaveCluster     = virtualSlot2SaveCluster;
 	loader->romSize                     = conf->romSize;
 	loader->saveSize                    = conf->saveSize;
-	// loader->gbaRomSize                  = conf->gbaRomSize;
-	// loader->gbaSaveSize                 = conf->gbaSaveSize;
+	loader->virtualSlot2RomSize         = conf->virtualSlot2RomSize;
+	loader->virtualSlot2SaveSize        = conf->virtualSlot2SaveSize;
 	loader->quitFileCluster             = quitCluster;
 	for (int i = 0; i < 4; i++) {
 		loader->dataToPreloadAddr[i]    = conf->dataToPreloadAddr[i];
@@ -346,12 +346,18 @@ int runNds(u32 cluster, u32 saveCluster, u32 donorTwlCluster, /* u32 gbaCluster,
 	VRAM_C_CR = VRAM_ENABLE | VRAM_C_LCD;
 	VRAM_D_CR = VRAM_ENABLE | VRAM_D_LCD;
 
+	loader->virtualSlot2Magic    = (conf->virtualSlot2Flags & (SLOT2_ENABLED | SLOT2_EMPTY)) ? SLOT2_MAGIC : 0;
+	loader->virtualSlot2Flags    = conf->virtualSlot2Flags;
+	loader->virtualSlot2SaveType = conf->virtualSlot2SaveType;
+	tonccpy(loader->virtualSlot2Header, conf->virtualSlot2Header, sizeof(loader->virtualSlot2Header));
+
 	// Set the parameters for the loader
 
 	// Load the loader into the correct address
 	tonccpy(lc0, loader, 0x40000); //vramcpy(LCDC_BANK_D, loader, loaderSize);
 
-	if(conf->gameOnFlashcard || conf->saveOnFlashcard) {
+	if(conf->gameOnFlashcard || conf->saveOnFlashcard
+	 || (conf->virtualSlot2Flags & (SLOT2_ROM_ON_FLASHCARD | SLOT2_SAVE_ON_FLASHCARD))) {
 		// Patch the loader with a DLDI for the card
 		if (!dldiPatchLoader ((data_t*)lc0, 0x40000, conf->initDisc, altDldi)) {
 			return 3;

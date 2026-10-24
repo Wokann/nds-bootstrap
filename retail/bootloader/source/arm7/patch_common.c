@@ -562,7 +562,11 @@ u32 patchCardNds(
 
 	//if (cardReadFound || ndsHeader->fatSize == 0) {
 	if (errorCodeArm9 == ERR_NONE || ndsHeader->fatSize == 0) {
-		return patchCardNdsArm7(ce7, ndsHeader, moduleParams, saveFileCluster, buttonsRemapped);
+		u32 errorCodeArm7 = patchCardNdsArm7(ce7, ndsHeader, moduleParams, saveFileCluster, buttonsRemapped);
+#ifdef LOADERTYPE0
+		if (errorCodeArm7 == ERR_NONE) patchVirtualSlot2(ce9, ndsHeader);
+#endif
+		return errorCodeArm7;
 	}
 
 	return ERR_LOAD_OTHR;
