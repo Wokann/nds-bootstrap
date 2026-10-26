@@ -186,18 +186,14 @@ extern void loadApFix(configuration* conf, const char* bootstrapPath, const char
 extern void loadMobiclipOffsets(configuration* conf, const char* bootstrapPath, const char* romTid, const u8 romVersion, const u16 headerCRC);
 extern void loadDSi2DSSavePatch(configuration* conf, const char* bootstrapPath, const char* romTid, const u8 romVersion, const u16 headerCRC);
 
-static int loadCardEngineBinary(const char* cardenginePath, u8* location) {
+static int loadCardEngineBinary(const char* cardenginePath, u8* location, u32 clearSize = 0) {
 	FILE* cebin = fopen(cardenginePath, "rb");
 	int size;
 	if(!cebin) {
 		return -ENOENT;
 	}
-	/* These staging regions also supply zero-filled BSS when copied by ARM7. */
-	if (location == (u8*)CARDENGINE_ARM9_LOCATION_BUFFERED
-	 || location == (u8*)CARDENGINEI_ARM9_BUFFERED_LOCATION
-	 || location == (u8*)CARDENGINEI_ARM9_SDK5_BUFFERED_LOCATION
-	 || location == (u8*)CARDENGINEI_ARM7_BUFFERED_LOCATION) {
-		toncset32(location, 0, 0x10000 / sizeof(u32));
+	if (clearSize) {
+		toncset32(location, 0, clearSize / sizeof(u32));
 	}
 	fseek(cebin, 0, SEEK_END);
 	size = ftell(cebin);
@@ -1073,6 +1069,8 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 		conf->virtualSlot2SavPath[0] = 0;
 		conf->virtualSlot2SaveType = GBA_SAVE_NONE;
 	}
+	const bool virtualSlot2 = (conf->virtualSlot2RomPath && conf->virtualSlot2RomPath[0])
+		|| (conf->virtualSlot2Flags & SLOT2_EMPTY);
 
 	if (conf->isDSiWare || (accessControl & BIT(4))) {
 		if (romTid[3] == 'K') {
@@ -1652,7 +1650,7 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 				// Load ce7 binary
 				rc = loadCardEngineBinary(
 					dsiEnhancedMbk ? "nitro:/cardenginei_arm7_alt.lz77" : "nitro:/cardenginei_arm7.lz77",
-					(u8*)ce7
+					(u8*)ce7, virtualSlot2 ? 0xF800 : 0
 				);
 				if (rc == 0) {
 					for (int i = 0; i < 2; i++) {
@@ -1674,7 +1672,7 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 					conf->gameOnFlashcard && altReadMethod
 				?	(gsdd ? "nitro:/cardenginei_arm9_gsdd_dldi.lz77" : "nitro:/cardenginei_arm9_dldi.lz77")
 				:	(gsdd ? "nitro:/cardenginei_arm9_gsdd.lz77" : "nitro:/cardenginei_arm9.lz77")
-				, (u8*)CARDENGINEI_ARM9_BUFFERED_LOCATION);
+				, (u8*)CARDENGINEI_ARM9_BUFFERED_LOCATION, virtualSlot2 ? 0x37A0 : 0);
 			}
 
 			bool found = (access(pageFilePath.c_str(), F_OK) == 0);
@@ -2394,7 +2392,12 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 		const bool foto = (strncmp(romTid, "DMF", 3) == 0 || strncmp(romTid, "DSY", 3) == 0 || strncmp(romTid, "KSY", 3) == 0);
 
 		// Load ce9 binary
-		if (b4dsDebugRam) {
+		toncset32((u32*)CARDENGINE_ARM9_LOCATION_BUFFERED, 0, 0x3C00 / sizeof(u32));
+		if (virtualSlot2) {
+			loadCardEngineBinary(io_dldi_data->driverSize >= 0x0E
+				? "nitro:/cardengine_arm9_32.lz77" : "nitro:/cardengine_arm9.lz77",
+				(u8*)CARDENGINE_ARM9_LOCATION_BUFFERED);
+		} else if (b4dsDebugRam) {
 			if (!startMultibootSrl && ((accessControl & BIT(4)) || (a7mbk6 == 0x080037C0 && ndsArm9Offset >= 0x02004000))) {
 				if (foto) {
 					loadCardEngineBinary("nitro:/cardengine_arm9_extmem_foto.lz77", (u8*)CARDENGINE_ARM9_LOCATION_BUFFERED);
@@ -2490,13 +2493,6 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 			loadCardEngineBinary(ce9path, (u8*)CARDENGINE_ARM9_LOCATION_BUFFERED);
 		}
 
-		/* ALT3 keeps virtual Slot-2 below the existing DLDI area. */
-		if ((conf->virtualSlot2RomPath && *conf->virtualSlot2RomPath) || (conf->virtualSlot2Flags & SLOT2_EMPTY)) {
-			loadCardEngineBinary(io_dldi_data->driverSize >= 0x0E
-				? "nitro:/cardengine_arm9_32.lz77" : (accessControl & BIT(4))
-				? "nitro:/cardengine_arm9.lz77" : "nitro:/cardengine_arm9_alt3.lz77",
-				(u8*)CARDENGINE_ARM9_LOCATION_BUFFERED);
-		}
 		cebin = fopen("nitro:/cardengine_arm9_dldipatcher.bin", "rb");
 		conf->dldiPatchBinaryOffset = offsetOfOpenedNitroFile;
 		fclose(cebin);

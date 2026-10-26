@@ -80,7 +80,7 @@ typedef struct loadCrt0 {
 	u32 virtualSlot2Magic;
 	u32 virtualSlot2Flags;
 	u32 virtualSlot2SaveType;
-	u8 virtualSlot2Header[0xC0];
+	u8 virtualSlot2Header[0x40];
 } loadCrt0;
 
 extern u32 virtualSlot2RomCluster;
@@ -90,6 +90,6 @@ extern u32 virtualSlot2SaveSize;
 extern u32 virtualSlot2Magic;
 extern u32 virtualSlot2Flags;
 extern u32 virtualSlot2SaveType;
-extern u8 virtualSlot2Header[0xC0];
+extern u8 virtualSlot2Header[0x40];
 
 #endif // LOAD_CRT0_H

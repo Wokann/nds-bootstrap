@@ -139,6 +139,8 @@ cardengine.ld:	$(CURDIR)/../cardengine.ld.in
 	@$(OBJCOPY) -O binary $< $@
 	@echo built ... $(notdir $@)
 
+slot2.o: CFLAGS += -Oz
+
 -include $(DEPSDIR)/*.d
  
 #---------------------------------------------------------------------------------------

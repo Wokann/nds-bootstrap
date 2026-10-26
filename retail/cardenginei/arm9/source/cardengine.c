@@ -1578,7 +1578,8 @@ int virtualSlot2Transfer(u32 op, u32 offset, void *buffer, u32 len) {
 	while (sharedAddr[3]) { IPC_SendSync(0x4); swiDelay(32); }
 	/* FAT binding may initialize both backing volumes on the first request. */
 	sysSetCardOwner(BUS_OWNER_ARM7);
-	request.config = virtualSlot2Config9;
+	request.config = (uint32_t)&virtualSlot2Config9;
+	DC_FlushRange(&virtualSlot2Config9, sizeof(virtualSlot2Config9));
 	request.operation = op;
 	int result;
 	u32 done = 0;

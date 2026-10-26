@@ -1071,7 +1071,7 @@ u32 dsiSaveGetResultCode(const char* path) {
 
 	dsiSaveInit();
 
-	if (strcmp(path, "data") == 0) // Specific to EnjoyUp-developed games
+	if (strncmp(path, "data", sizeof("data")) == 0) // Specific to EnjoyUp-developed games
 	{
 		return dsiSaveExists ? 8 : 0xE;
 	}
@@ -1090,7 +1090,7 @@ bool dsiSaveCreate(const char* path, u32 permit) {
 	//	return false;
 	//}
 
-	if (strcmp(path, "data") == 0) // Specific to EnjoyUp-developed games
+	if (strncmp(path, "data", sizeof("data")) == 0) // Specific to EnjoyUp-developed games
 	{
 		return !dsiSaveExists;
 	} else
@@ -1152,8 +1152,8 @@ bool dsiSaveGetInfo(const char* path, dsiSaveInfo* info) {
 	dsiSaveInit();
 	dsiSaveResultCode = 0;
 
-	if (strcmp(path, "dataPub:") == 0 || strcmp(path, "dataPub:/") == 0
-	 || strcmp(path, "dataPrv:") == 0 || strcmp(path, "dataPrv:/") == 0)
+	if (strncmp(path, "dataPub:", sizeof("dataPub:")) == 0 || strncmp(path, "dataPub:/", sizeof("dataPub:/")) == 0
+	 || strncmp(path, "dataPrv:", sizeof("dataPrv:")) == 0 || strncmp(path, "dataPrv:/", sizeof("dataPrv:/")) == 0)
 	{
 		return true;
 	} else if (!dsiSaveExists) {
@@ -1195,7 +1195,7 @@ u32 dsiSaveSetLength(void* ctx, s32 len) {
 
 bool dsiSaveOpen(void* ctx, const char* path, u32 mode) {
 	dsiSaveSeekPos = 0;
-	if (strcmp(path, "nand:/<sharedFont>") == 0) {
+	if (strncmp(path, "nand:/<sharedFont>", sizeof("nand:/<sharedFont>")) == 0) {
 		if (sharedFontFile.firstCluster == CLUSTER_FREE || sharedFontFile.firstCluster == CLUSTER_EOF) {
 			dsiSaveResultCode = 0xE;
 			toncset32(ctx+0x14, dsiSaveResultCode, 1);

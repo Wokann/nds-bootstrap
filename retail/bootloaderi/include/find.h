@@ -106,12 +106,12 @@ extern const u32 slot2FlashMakerSignature21[2];
 extern const u32 slot2FlashMakerSignature31[2];
 extern const u32 slot2FlashMakerSignature31Alt[2];
 extern const u32 slot2ModuleInfoHeaderSignature2[2];
-extern const u32 slot2ModuleInfoFinishSignature2[3];
-extern const u16 slot2ModuleInfoHeaderSignatureThumb2[2];
 extern const u16 slot2ModuleInfoEndSignatureThumb2[4];
 extern const u32 slot2ModuleInfoHeaderSignature3[2];
-extern const u32 slot2ModuleInfoFinishSignature3[2];
-extern const u32 slot2ModuleInfoFinishSignature4[2];
+extern const u32 slot2ModuleInfoHeaderSignature5[2];
+extern const u32 slot2ModuleInfoSharedSignature5[1];
+extern const u16 slot2ModuleInfoSizeSignatureThumb[1];
+extern const u16 slot2ModuleInfoDestinationSignatureThumb[1];
 extern const u32 slot2GpioDataSignature31[7];
 extern const u32 slot2GpioInitSignature31[3];
 

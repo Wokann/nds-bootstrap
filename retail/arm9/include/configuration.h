@@ -41,7 +41,7 @@ typedef struct configuration {
 	u32 virtualSlot2SaveSize;
 	u32 virtualSlot2Flags;
 	u32 virtualSlot2SaveType;
-	u8 virtualSlot2Header[0xC0];
+	u8 virtualSlot2Header[0x40];
 	u32 wideCheatSize;
 	u32 apPatchOffset;
 	u32 apPatchSize;

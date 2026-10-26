@@ -41,7 +41,11 @@
 #define fatCached BIT(0)
 #define fatCompressed BIT(1)
 #define fatCard2 BIT(2)
+#ifdef VIRTUAL_SLOT2
 #define fatCheckErrors BIT(3) // Propagate disk errors for virtual Slot-2 files.
+#else
+#define fatCheckErrors 0
+#endif
 
 typedef	struct
 {

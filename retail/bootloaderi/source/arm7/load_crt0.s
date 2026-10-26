@@ -271,7 +271,7 @@ virtualSlot2Flags:
 virtualSlot2SaveType:
 	.word	0x00000000
 virtualSlot2Header:
-	.space	192
+	.space	64
 .align 4
 
 startUp:

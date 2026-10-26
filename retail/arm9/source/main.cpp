@@ -557,15 +557,16 @@ static int runNdsFile(configuration* conf) {
 		FILE* rom = fopen(conf->virtualSlot2RomPath, "rb");
 		if (!rom)
 			return -3;
-		const size_t got = fread(conf->virtualSlot2Header, 1, sizeof(conf->virtualSlot2Header), rom);
-		if (got != sizeof(conf->virtualSlot2Header) || conf->virtualSlot2Header[0xB2] != 0x96) {
+		if (fseek(rom, 0x80, SEEK_SET) != 0 ||
+			fread(conf->virtualSlot2Header, 1, sizeof(conf->virtualSlot2Header), rom) != sizeof(conf->virtualSlot2Header) ||
+			conf->virtualSlot2Header[0x32] != 0x96) {
 			fclose(rom);
 			return -3;
 		}
 		conf->virtualSlot2SaveType = requestedType;
 		if (requestedType == GBA_SAVE_AUTO && conf->virtualSlot2SavPath && *conf->virtualSlot2SavPath) {
 			// These GBA ROMs contain tags for more than one save type.
-			const u8* gameCode = conf->virtualSlot2Header + 0xAC;
+			const u8* gameCode = conf->virtualSlot2Header + 0x2C;
 			if (!memcmp(gameCode, "BR4J", 4)) { // Rockman EXE 4.5: FLASH512_V131, SRAM_V113
 				conf->virtualSlot2SaveType = GBA_SAVE_FLASH512;
 			} else if (!memcmp(gameCode, "BYUJ", 4) || // Yggdra Union: EEPROM_V126, SRAM_V113

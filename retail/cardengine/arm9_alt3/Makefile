@@ -40,11 +40,11 @@ CFLAGS	:=	-g -Wall -Oz\
 			$(ARCH)
 
 # ADD -DDEBUG here for logging/debug
-CFLAGS	+=	$(INCLUDE) -DVIRTUAL_SLOT2 -DARM9 -DB4DS -D_NO_SDMMC -DNO_CARDID -DNODSIWARE -DNOGETBOOTCLUSTER -DSKIPCLUSTERFAILSAFE
+CFLAGS	+=	$(INCLUDE) -DARM9 -DB4DS -D_NO_SDMMC -DNO_CARDID -DNODSIWARE -DNOGETBOOTCLUSTER -DSKIPCLUSTERFAILSAFE
 CXXFLAGS	:=	$(CFLAGS) -fno-rtti -fno-exceptions
 
 ASFLAGS	:=	-g $(ARCH) -flto $(INCLUDE)
-ASFLAGS	+=	-DNODSIWARE -DVIRTUAL_SLOT2
+ASFLAGS	+=	-DNODSIWARE
 
 LDFLAGS	=	-nostartfiles -T cardengine.ld -g $(ARCH) -flto -Oz -Wl,-Map,$(notdir $*.map),--use-blx
 
@@ -132,7 +132,7 @@ $(DEPSDIR)/$(TARGET).elf:	cardengine.ld $(OFILES)
 #	@$(LD)  $(LDFLAGS) $(OFILES) $(LIBPATHS) $(LIBS) -o $@
 
 cardengine.ld:	$(CURDIR)/../cardengine.ld.in
-	$(CPP) -P -x c $(INCLUDE) $< -o $@
+	$(CPP) -P $(INCLUDE) $< $@
 
 
 #---------------------------------------------------------------------------------

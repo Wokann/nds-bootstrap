@@ -203,10 +203,7 @@ patches:
 .word   musicStopEffect_arm
 #endif
 #ifdef VIRTUAL_SLOT2
-@ Appended to both full and reduced tables, immediately before thumbPatches.
 .word   virtualSlot2Patches
-#else
-.word   0
 #endif
 thumbPatches:
 #ifdef GSDD

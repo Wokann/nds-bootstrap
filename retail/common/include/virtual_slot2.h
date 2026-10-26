@@ -10,6 +10,7 @@
 #define SLOT2_SAVE_ON_FLASHCARD (1u << 2)
 #define SLOT2_SAVE_WRITABLE (1u << 3)
 #define SLOT2_EMPTY (1u << 4)
+#define SLOT2_TWL_SHARED_INFO (1u << 5)
 #define GBA_FLASH_SECTOR_SIZE 0x1000u
 
 enum GbaSaveType {
@@ -30,9 +31,9 @@ typedef struct VirtualSlot2Config {
 	u32 romSize;
 	u32 saveSize;
 	u32 saveType;
-	u8 header[0xC0];
+	u8 header[0x40]; // GBA header bytes 0x80-0xBF used by ModuleInfo.
 } VirtualSlot2Config;
-typedef char VirtualSlot2Config_size_check[sizeof(VirtualSlot2Config) == 220 ? 1 : -1];
+typedef char VirtualSlot2Config_size_check[sizeof(VirtualSlot2Config) == 92 ? 1 : -1];
 
 // Virtual GBA files and their ARM9/ARM7 transport.
 
@@ -45,7 +46,7 @@ enum VirtualSlot2Operation {
 	VIRTUAL_SLOT2_FLASH_ERASE
 };
 typedef struct VirtualSlot2Request {
-	VirtualSlot2Config config;
+	u32 config;
 	u32 operation, offset, length, buffer;
 } VirtualSlot2Request;
 

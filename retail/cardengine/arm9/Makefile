@@ -35,7 +35,7 @@ ARCH	:=	-mthumb -march=armv5te -mtune=arm946e-s
 
 CFLAGS	:=	-g -Wall -Oz\
  			-march=armv5te -mtune=arm946e-s -fomit-frame-pointer\
-			-ffast-math \
+			-ffast-math -flto -ffunction-sections -fdata-sections -fno-builtin-strncmp \
 			$(ARCH)
 
 # ADD -DDEBUG here for logging/debug
@@ -44,7 +44,7 @@ CXXFLAGS	:=	$(CFLAGS) -fno-rtti -fno-exceptions
 
 ASFLAGS	:=	-g $(ARCH) -flto $(INCLUDE) -DVIRTUAL_SLOT2
 
-LDFLAGS	=	-nostartfiles -T cardengine.ld -g $(ARCH) -Oz -Wl,-Map,$(notdir $*.map),--use-blx
+LDFLAGS	=	-nostartfiles -T cardengine.ld -g $(ARCH) -Oz -flto -Wl,-Map,$(notdir $*.map),--use-blx,--gc-sections,--sort-section=alignment
 
 #---------------------------------------------------------------------------------
 # any extra libraries we wish to link with the project (order is important)
@@ -125,11 +125,13 @@ $(OUTPUT_CMP).lz77: $(OUTPUT).bin
 	@$(LZSS) -ewf $@
 
 $(OUTPUT).bin:	$(DEPSDIR)/$(TARGET).elf
+$(OFILES): $(CURDIR)/../Makefile
+
 $(DEPSDIR)/$(TARGET).elf:	cardengine.ld $(OFILES)
 #	@echo linking $(notdir $@)
 #	@$(LD)  $(LDFLAGS) $(OFILES) $(LIBPATHS) $(LIBS) -o $@
 
-cardengine.ld:	$(CURDIR)/../cardengine.ld.in
+cardengine.ld:	$(CURDIR)/../cardengine.ld.in $(CURDIR)/../Makefile
 	$(CPP) -P $(INCLUDE) $< $@
 
 

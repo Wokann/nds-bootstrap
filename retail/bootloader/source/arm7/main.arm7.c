@@ -72,6 +72,8 @@
 #include "common.h"
 #include "locations.h"
 #include "value_bits.h"
+#include "load_crt0.h"
+#include "virtual_slot2.h"
 #include "loading_screen.h"
 #include "unpatched_funcs.h"
 
@@ -1407,11 +1409,12 @@ int arm7_main(void) {
 	toncset((u8*)CARDENGINE_ARM7_LOCATION_BUFFERED, 0, 0x1080);
 
 	ce9Location = *(u32*)CARDENGINE_ARM9_LOCATION_BUFFERED;
+	const bool ce9Full = (ce9Location == CARDENGINE_ARM9_LOCATION_DLDI || ce9Location == CARDENGINE_ARM9_LOCATION_DLDI_32);
 	ce9Alt = (ce9Location == CARDENGINE_ARM9_LOCATION_DLDI_ALT || ce9Location == CARDENGINE_ARM9_LOCATION_DLDI_ALT2);
 	// const bool ce9NotInHeap = (ce9Alt || ce9Location == CARDENGINE_ARM9_LOCATION_DLDI_START);
 	tonccpy((u32*)ce9Location, (u32*)CARDENGINE_ARM9_LOCATION_BUFFERED,
-		(ce9Location == CARDENGINE_ARM9_LOCATION_DLDI || ce9Location == CARDENGINE_ARM9_LOCATION_DLDI_32)
-		? 0x4800 : ce9Alt ? 0x2800 : 0x3800);
+		ce9Full ? 0x3C00
+		: ce9Alt ? 0x2800 : 0x3800);
 	toncset((u32*)0x023E0000, 0, 0x10000);
 
 	aFile musicsFile;
@@ -1543,7 +1546,11 @@ int arm7_main(void) {
 					}
 
 					const u32 cheatSizeTotal = cheatSize+(apPatchIsCheat ? apPatchSize : 0);
-					if (fatTableAddr != CARDENGINE_ARM9_LOCATION_DLDI && cheatSizeTotal > 4) {
+					if (ce9Full) {
+						// Keep the relocated cache below the card engine.
+						fatTableSizeNoExp -= fatTableAddr - ce9Location;
+						fatTableAddr = ce9Location;
+					} else if (fatTableAddr != CARDENGINE_ARM9_LOCATION_DLDI && cheatSizeTotal > 4) {
 						fatTableAddr -= 0x2000;
 						fatTableSizeNoExp -= 0x2000;
 					}
@@ -1668,7 +1675,7 @@ int arm7_main(void) {
 		ce9DldiItcm = 0x01FFC000; // Set <= 16KB DLDI location at ITCM
 	}
 	if (!dldiPatchBinary((data_t*)ce9Location,
-		(ce9Location == CARDENGINE_ARM9_LOCATION_DLDI || ce9Location == CARDENGINE_ARM9_LOCATION_DLDI_32) ? 0x4800 : 0x3800,
+		ce9Full ? 0x3C00 : 0x3800,
 		(data_t*)ce9DldiOffset, (data_t*)ce9DldiItcm)) {
 		dbg_printf("ce9 DLDI patch failed\n");
 		errorOutput();

@@ -50,29 +50,29 @@ static void slot2CopyHeader(u32 dma, const void* src, void* dst, u32 len) {
 	(void)dma;
 	/* Keep the original ModuleInfo/PXI handshake. ARM7 must finish cartridge
 	 * initialization before it advertises its CARD callback to ARM9. */
-	if (!slot2IsExisting() || (u32)src != 0x08000080u || len != 0x40)
-		return;
-	tonccpy(dst, virtualSlot2Config9.header + 0x80, len);
+	(void)src;
+	if (slot2IsExisting())
+		tonccpy(dst, virtualSlot2Config9.header, len);
 }
 static u32 slot2InitEnd(u32 mask) {
 	/* Finish the native ARM7 handshake, then make the shared identity match
 	 * the virtual cart. Restore IE with the native OS_SetIrqMask return ABI. */
 	const int ime = enterCriticalSection();
-	*(volatile u8*)0x027FFC35 = slot2IsExisting() ? 1 : 0;
+	*(volatile u8*)((virtualSlot2Config9.flags & SLOT2_TWL_SHARED_INFO) ? 0x02FFFC35 : 0x027FFC35) = slot2IsExisting() ? 1 : 0;
 	u32 previous = REG_IE;
 	REG_IE = mask;
 	leaveCriticalSection(ime);
 	return previous;
 }
 static u32 slot2InitThumb(u32 arg, const void* src, void* dst, u32 len) {
-	/* SDK2 Thumb ModuleInfo shares its header literal between both calls.
-	 * The first passes this entry in r1; the final call passes NULL. */
-	if (!src)
+	/* ModuleInfo loads this entry in r1 for the header copy. Its final IRQ
+	 * restore keeps a hardware-register pointer in r1 and the mask in r0. */
+	if ((u32)src != (u32)slot2InitThumb)
 		return slot2InitEnd(arg);
-	if ((u32)src == (u32)slot2InitThumb)
-		slot2CopyHeader(arg, (const void*)0x08000080u, dst, len);
+	slot2CopyHeader(arg, (const void*)0x08000080u, dst, len);
 	return 0;
 }
+
 static void slot2PulledCallback(u32 tag, u32 data, u32 error) {
 	(void)tag;
 	(void)data;
@@ -104,20 +104,15 @@ static int slot2CardAccess(void* address, u32 value, void* result, u32 type) {
 	return slot2CardCopy(0, &value, address, len, 1);
 }
 static u32 slot2FlashRead(u32 sector, u32 off, void* dst, u32 size) {
-	if (sector >= virtualSlot2Config9.saveSize / GBA_FLASH_SECTOR_SIZE)
-		return 0x8000;
-	u32 offset = sector * GBA_FLASH_SECTOR_SIZE;
-	if (off > virtualSlot2Config9.saveSize - offset)
-		return 0x8000;
-	return virtualSlot2Transfer(VIRTUAL_SLOT2_SAVE_READ, offset + off, dst, size) ? 0 : 0x8000;
+	return virtualSlot2Transfer(VIRTUAL_SLOT2_SAVE_READ, sector * GBA_FLASH_SECTOR_SIZE + off, dst, size) ? 0 : 0x8000;
 }
 static u32 slot2FlashReadTask(const Slot2Task* t) {
-	return t ? slot2FlashRead(t->sector, t->offset, (void*)t->dst, t->size) : 0x8000;
+	return slot2FlashRead(t->sector, t->offset, (void*)t->dst, t->size);
 }
 static u32 slot2SramReadTask(const Slot2Task* t) {
 	/* SDK 3/4 SRAM uses an absolute source in task.offset; Flash uses a
 	 * sector plus relative offset. Both share the existing save transport. */
-	if (!t || t->offset < 0x0A000000u || t->offset >= 0x0A010000u || t->size > 0x0A010000u - t->offset)
+	if (t->offset < 0x0A000000u || t->offset >= 0x0A010000u || t->size > 0x0A010000u - t->offset)
 		return 0x8000;
 	return slot2FlashRead(0, t->offset - 0x0A000000u, (void*)t->dst, t->size);
 }
@@ -140,7 +135,7 @@ static u32 slot2FlashVerify(u32 sector, const u8* src, u32 size) {
 	return 0;
 }
 static u32 slot2FlashVerifyTask(const Slot2Task* t) {
-	return t ? slot2FlashVerify(t->sector, (const u8*)t->data, t->size) : 0x8000;
+	return slot2FlashVerify(t->sector, (const u8*)t->data, t->size);
 }
 static u32 slot2FlashVerifySector(u32 sector, const u8* src) {
 	return slot2FlashVerify(sector, src, GBA_FLASH_SECTOR_SIZE);
@@ -157,14 +152,14 @@ static u32 slot2FlashEraseSector(u32 sector) {
 	return virtualSlot2Transfer(VIRTUAL_SLOT2_FLASH_ERASE, sector * GBA_FLASH_SECTOR_SIZE, NULL, GBA_FLASH_SECTOR_SIZE) ? 0 : 0x8000;
 }
 static u32 slot2FlashWriteTask(const Slot2Task* t) {
-	return t ? slot2FlashWrite(t->sector, (void*)t->data) : 0x8000;
+	return slot2FlashWrite(t->sector, (void*)t->data);
 }
 static u32 slot2FlashEraseChipTask(const Slot2Task* t) {
 	(void)t;
 	return slot2FlashEraseChip();
 }
 static u32 slot2FlashEraseSectorTask(const Slot2Task* t) {
-	return t ? slot2FlashEraseSector(t->sector) : 0x8000;
+	return slot2FlashEraseSector(t->sector);
 }
 static u32 slot2FlashWriteVerify(u32 sector, const u8* src, u32 size) {
 	if (size > GBA_FLASH_SECTOR_SIZE || sector >= virtualSlot2Config9.saveSize / GBA_FLASH_SECTOR_SIZE)
@@ -180,7 +175,7 @@ static u32 slot2FlashWriteVerify(u32 sector, const u8* src, u32 size) {
 	return result;
 }
 static u32 slot2FlashWriteVerifyTask(const Slot2Task* t) {
-	return t ? slot2FlashWriteVerify(t->sector, (const u8*)t->data, t->size) : 0x8000;
+	return slot2FlashWriteVerify(t->sector, (const u8*)t->data, t->size);
 }
 static u32 slot2FlashWriteVerifySector(u32 sector, const u8* src) {
 	return slot2FlashWriteVerify(sector, src, GBA_FLASH_SECTOR_SIZE);
@@ -229,8 +224,6 @@ const VirtualSlot2Patches virtualSlot2Patches = {
 
 int virtualSlot2FileIO(const VirtualSlot2Config* cfg, u32 op, u32 offset, void* buffer, u32 len) {
 	static aFile virtualSlot2RomFile, virtualSlot2SavFile;
-	static u32 romCluster, saveCluster, volumeFlags;
-	static bool opened;
 	if (!cfg || cfg->magic != SLOT2_MAGIC || !(cfg->flags & SLOT2_ENABLED) || op > VIRTUAL_SLOT2_FLASH_ERASE)
 		return 0;
 	const bool rom = op == VIRTUAL_SLOT2_ROM_READ;
@@ -255,8 +248,7 @@ int virtualSlot2FileIO(const VirtualSlot2Config* cfg, u32 op, u32 offset, void* 
 		return 0;
 	if (!len)
 		return 1;
-	const u32 volumes = cfg->flags & (SLOT2_ROM_ON_FLASHCARD | SLOT2_SAVE_ON_FLASHCARD);
-	if (!opened || romCluster != cfg->romCluster || saveCluster != cfg->saveCluster || volumeFlags != volumes) {
+	if (virtualSlot2RomFile.firstCluster == CLUSTER_FREE) {
 #ifdef TWOCARD
 		if (!FAT_InitFiles(false, !!(cfg->flags & SLOT2_ROM_ON_FLASHCARD)))
 			return 0;
@@ -273,22 +265,27 @@ int virtualSlot2FileIO(const VirtualSlot2Config* cfg, u32 op, u32 offset, void* 
 #endif
 		virtualSlot2RomFile.fatTableSettings |= fatCheckErrors;
 		virtualSlot2SavFile.fatTableSettings |= fatCheckErrors;
-		romCluster = cfg->romCluster;
-		saveCluster = cfg->saveCluster;
-		volumeFlags = volumes;
-		opened = true;
 	}
 	aFile* file = rom ? &virtualSlot2RomFile : &virtualSlot2SavFile;
 	resetPrevSect(file);
 	u32 transferred = 0;
-	if (op == VIRTUAL_SLOT2_FLASH_ERASE) {
-		u8 erased[128];
-		toncset(erased, 0xFF, sizeof(erased));
+	if (op == VIRTUAL_SLOT2_FLASH_ERASE || (((u32)buffer - offset) & 3)) {
+		u32 block[32]; // Byte SDK transfers must keep sector I/O word-aligned.
+		if (op == VIRTUAL_SLOT2_FLASH_ERASE)
+			toncset(block, 0xFF, sizeof(block));
 		while (transferred < len) {
 			u32 count = len - transferred;
-			if (count > sizeof(erased))
-				count = sizeof(erased);
-			u32 result = fileWrite((const char*)erased, file, offset + transferred, count);
+			if (count > sizeof(block))
+				count = sizeof(block);
+			u32 result;
+			if (writing) {
+				if (op != VIRTUAL_SLOT2_FLASH_ERASE)
+					tonccpy(block, (u8*)buffer + transferred, count);
+				result = fileWrite((const char*)block, file, offset + transferred, count);
+			} else {
+				result = fileRead((char*)block, file, offset + transferred, count);
+				tonccpy((u8*)buffer + transferred, block, result);
+			}
 			transferred += result;
 			if (result != count)
 				break;

@@ -2250,7 +2250,7 @@ int arm7_main(void) {
 
 		// dbg_printf("Trying to patch the card...\n");
 
-		const u16 ce9size = (ROMsupportsDsiMode(&dsiHeaderTemp.ndshdr) && dsiModeConfirmed) ? 0x3800 : 0x3FA0;
+		const u16 ce9size = (ROMsupportsDsiMode(&dsiHeaderTemp.ndshdr) && dsiModeConfirmed) ? 0x3800 : 0x37A0;
 		ce7Location = *(u32*)CARDENGINEI_ARM7_BUFFERED_LOCATION;
 		u32 ce7Size = 0xF800;
 

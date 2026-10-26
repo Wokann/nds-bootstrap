@@ -1636,7 +1636,7 @@ static bool runVirtualSlot2Request(void) {
 	int result = 0;
 	if (address >= 0x02000000 && address <= 0x02800000 - sizeof(VirtualSlot2Request)) {
 		const VirtualSlot2Request *r = (const VirtualSlot2Request *)address;
-		result = virtualSlot2FileIO(&r->config, r->operation, r->offset, (void *)r->buffer, r->length);
+		result = virtualSlot2FileIO((const VirtualSlot2Config *)r->config, r->operation, r->offset, (void *)r->buffer, r->length);
 	}
 	sharedAddr[4] = result;
 	sharedAddr[3] = 0;
