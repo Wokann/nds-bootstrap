@@ -212,7 +212,10 @@ int hookNdsRetailArm7(
 	const bool laterSdk = ((moduleParams->sdk_version >= 0x2008000 && moduleParams->sdk_version != 0x2012774) || moduleParams->sdk_version == 0x20029A8);
 
 	u32 cheatEngineAddr = CHEAT_ENGINE_LOCATION_B4DS;
-	if (!extendedMemory && strncmp(romTid, "CLJ", 3) == 0) { // Mario & Luigi: Bowser's Inside Story
+	if (dlpSessionActive) {
+		// The cleared staging buffer keeps DLP's cheat callback inactive.
+		cheatEngineAddr = CHEAT_ENGINE_LOCATION_B4DS_BUFFERED;
+	} else if (!extendedMemory && strncmp(romTid, "CLJ", 3) == 0) { // Mario & Luigi: Bowser's Inside Story
 		cheatEngineAddr = 0x02002000;
 	} else if ((strncmp(romTid, "YEE", 3) == 0 && romTid[3] != 'J') || strncmp(romTid, "BEB", 3) == 0 || strncmp(romTid, "BEE", 3) == 0) { // Inazuma Eleven: Fix AP-fix causing undefined instruction
 		cheatEngineAddr = (u32)ce7-0x2000;
@@ -253,7 +256,7 @@ int hookNdsRetailArm7(
 	*vblankHandler = ce7->patches->vblankHandler;
 	*ipcSyncHandler = ce7->patches->fifoHandler;
 
-	if (!maxHeapOpen) {
+	if (!maxHeapOpen && !dlpSessionActive) {
 		aFile cheatFile; getFileFromCluster(&cheatFile, cheatFileCluster);
 		aFile apPatchFile; getFileFromCluster(&apPatchFile, apPatchFileCluster);
 		const u32 cheatSizeTotal = cheatSize+(apPatchIsCheat ? apPatchSize : 0);

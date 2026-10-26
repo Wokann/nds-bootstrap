@@ -1696,9 +1696,31 @@ int arm7_main(void) {
 			session.magic = 0;
 		}
 		dlpSetSession(&session, srlFromPageFile);
+#ifndef LOADERTYPE2
+		if (dlpSessionActive) {
+			dbg_printf(srlFromPageFile ? "DLP: downloaded SRL\n" : "DLP: initial receiver\n");
+			dbg_printf(session.mode == DLP_SLOT1_PHYSICAL ? "DLP Slot-1: physical\n"
+				: (session.flags & DLP_VIRTUAL_SLOT1_EMPTY) ? "DLP Slot-1: virtual (empty)\n" : "DLP Slot-1: virtual\n");
+			dbg_printf("DLP session flags: ");
+			dbg_hexa(session.flags);
+			dbg_printf("\n");
+			if (dlpVirtualSlot1Active && !dlpVirtualSlot1Empty) {
+				dbg_printf("DLP virtual Slot-1 ROM/save clusters: ");
+				dbg_hexa(session.romCluster);
+				dbg_printf("/");
+				dbg_hexa(session.saveCluster);
+				dbg_printf("\n");
+			}
+		} else if (session.magic == DLP_SESSION_MAGIC) {
+			dbg_printf("DLP session invalid\n");
+		}
+#endif
 		dlpReceiverOnFlashcard = gameOnFlashcard;
 		dlpVirtualSlot1NeedsDldi = dlpSessionActive && session.mode == DLP_SLOT1_VIRTUAL && (session.flags & (DLP_VIRTUAL_SLOT1_ROM_FAT | DLP_VIRTUAL_SLOT1_SAVE_FAT));
 		if (dlpVirtualSlot1NeedsDldi && !gameOnFlashcard && !saveOnFlashcard && !bootstrapOnFlashcard) {
+#ifndef LOADERTYPE2
+			dbg_printf("DLP: initializing virtual Slot-1 DLDI\n");
+#endif
 			if (!FAT_InitFiles(initDisc, true)) errorOutput();
 		}
 		if (dlpVirtualSlot1Active && !dlpVirtualSlot1Empty) {
@@ -1713,11 +1735,6 @@ int arm7_main(void) {
 			toncset(dataToPreloadSize, 0, sizeof(u32)*4);
 		}
 		if (dlpVirtualSlot1Empty) { saveSize = 0; saveRelocation = true; }
-		if (dlpSessionActive && srlFromPageFile) {
-			++session.generation;
-			session.checksum = dlpSessionChecksum(&session);
-			if (fileWrite((char*)&session, &sessionFile, DLP_SESSION_PAGE_OFFSET, sizeof(session)) != sizeof(session)) errorOutput();
-		}
 	}
 
 	// ROM file
@@ -2344,7 +2361,7 @@ int arm7_main(void) {
 		}
 
 		tonccpy((u32*)ce7Location, (u32*)CARDENGINEI_ARM7_BUFFERED_LOCATION, ce7Size);
-		if (gameOnFlashcard || saveOnFlashcard || dlpVirtualSlot1NeedsDldi) {
+		if (gameOnFlashcard || saveOnFlashcard || (dlpSessionActive && bootstrapOnFlashcard) || dlpVirtualSlot1NeedsDldi) {
 			if (!dldiPatchBinary((data_t*)ce7Location, ce7Size-0x400, (data_t*)((ROMsupportsDsiMode(ndsHeader) && dsiModeConfirmed) ? 0 : (dsiEnhancedMbk ? CARDENGINEI_ARM7_LOCATION_ALT_DLDI : CARDENGINEI_ARM7_LOCATION_DLDI)))) {
 				dbg_printf("ce7 DLDI patch failed\n");
 				errorOutput();

@@ -234,15 +234,13 @@ void reset(u32 param, u32 param2) {
 	#ifndef GSDD
 	const bool rebootConsole = (isDSiWare || iUncompressedSize > 0x280000);
 	#endif
-	#if DLP_STAGING_ARM9
-	const bool downloadedSrl = (param2 == 0x4C525344 || param2 == DLP_STATION_HANDOFF);
-	#else
-	const bool downloadedSrl = (param2 == 0x4C525344);
-	#endif
+	const bool dlpHandoff = DLP_STAGING_ARM9 && (valueBits & BIT(23))
+		&& (param2 == 0x4C525344 || param2 == DLP_STATION_HANDOFF);
+	const bool downloadedSrl = (param2 == 0x4C525344 || dlpHandoff);
 	bool preparedDlp = false;
 	bool ramDlp = false;
 	#if DLP_STAGING_ARM9
-	if (downloadedSrl && (valueBits & BIT(23))) {
+	if (dlpHandoff) {
 		// B4DS storage runs on ARM9. Stop the old ARM7 audio before
 		// staging can overwrite buffers that its mixer still references.
 		enterCriticalSection();
@@ -266,9 +264,9 @@ void reset(u32 param, u32 param2) {
 			sharedAddr[1] = 0x57495344; // 'DSIW'
 		}
 		if (param != 0xFFFFFFFF && !igmReset && downloadedSrl) {
-			DlpStageImage image = {(u32)ndsHeader->arm9destination, 0x022C0000};
+			DlpStageImage image = {(u32)ndsHeader->arm9destination, dlpHandoff ? 0x022C0000 : (u32)ndsHeader->arm7destination};
 			#if DLP_STAGING_ARM9
-			if (param2 == DLP_STATION_HANDOFF && (valueBits & BIT(23))) {
+			if (param2 == DLP_STATION_HANDOFF && dlpHandoff) {
 				if (dlpStageStation((u32*)ndsHeader, (u32*)0x023FE840,
 				                    (u8*)0x023FE800, (u8*)0x027FFC42, &image) < 0) while (1);
 			}
@@ -277,10 +275,12 @@ void reset(u32 param, u32 param2) {
 			*(u32*)(resetParams+8) = 0x44414F4C; // 'LOAD'
 			writeDlpFile((char*)ndsHeader, &pageFile, 0x2BFE00, 0x160);
 			#if DLP_STAGING_ARM9
-			DlpRamBoot ram = {DLP_RAM_MAGIC, image.arm9Source, image.arm7Source};
-			ramDlp = preparedDlp && dlpRamBootValid((u32*)ndsHeader, &ram);
-			if (!ramDlp) ram.magic = 0;
-			writeDlpFile((char*)&ram, &pageFile, DLP_RAM_PAGE_OFFSET, sizeof(ram));
+			if (dlpHandoff) {
+				DlpRamBoot ram = {DLP_RAM_MAGIC, image.arm9Source, image.arm7Source};
+				ramDlp = preparedDlp && dlpRamBootValid((u32*)ndsHeader, &ram);
+				if (!ramDlp) ram.magic = 0;
+				writeDlpFile((char*)&ram, &pageFile, DLP_RAM_PAGE_OFFSET, sizeof(ram));
+			}
 			#endif
 			if (!ramDlp) {
 				writeDlpFile((char*)image.arm9Source, &pageFile, 0x14000, ndsHeader->arm9binarySize);
@@ -412,9 +412,8 @@ void reset(u32 param, u32 param2) {
 
 		WRAM_CR = 0; // Set shared ram to ARM9
 
-		// A received SRL must re-enter the full loader to apply its own SDK
-		// patches. QUIT_PATH remains the target for ordinary menu exits.
-		aFile* restartFile = downloadedSrl ? &ndsBootstrap : &bootNds;
+		// A DLP handoff re-enters the loader to apply the received program's SDK patches.
+		aFile* restartFile = dlpHandoff ? &ndsBootstrap : &bootNds;
 		if (preparedDlp) {
 			restartFile = &bootNds;
 			VRAM_C_CR = 0x80;

@@ -365,10 +365,10 @@ int runNds(u32 cluster, u32 saveCluster, u32 donorTwlCluster, /* u32 gbaCluster,
 		loader->asyncDataSize[i]        = conf->asyncDataSize[i];
 	}
 	loader->wideCheatFileCluster        = wideCheatCluster;
-	loader->wideCheatSize               = conf->wideCheatSize;
+	loader->wideCheatSize               = conf->dlpSessionActive ? 0 : conf->wideCheatSize;
 	loader->apPatchFileCluster          = apPatchCluster;
 	loader->apPatchOffset               = conf->apPatchOffset;
-	loader->apPatchSize                 = conf->apPatchSize;
+	loader->apPatchSize                 = conf->dlpSessionActive ? 0 : conf->apPatchSize;
 	loader->apPatchPostCardReadFileCluster = apPatchPostCardReadCluster;
 	loader->apPatchPostCardReadOffset   = conf->apPatchPostCardReadOffset;
 	loader->apPatchPostCardReadSize     = conf->apPatchPostCardReadSize;
@@ -378,7 +378,7 @@ int runNds(u32 cluster, u32 saveCluster, u32 donorTwlCluster, /* u32 gbaCluster,
     loader->dsi2dsSavePatchOffset       = conf->dsi2dsSavePatchOffset;
     loader->dsi2dsSavePatchSize         = conf->dsi2dsSavePatchSize;
 	loader->cheatFileCluster            = cheatCluster;
-	loader->cheatSize                   = conf->cheatSize;
+	loader->cheatSize                   = conf->dlpSessionActive ? 0 : conf->cheatSize;
 	loader->patchOffsetCacheFileCluster = patchOffsetCacheCluster;
 	loader->ramDumpCluster              = ramDumpCluster;
 	loader->srParamsFileCluster         = srParamsCluster;

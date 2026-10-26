@@ -238,24 +238,20 @@ static inline void debugConf(configuration* conf) {
 static int writeDlpSession(const configuration* conf) {
 	DlpSession session = {};
 	// Scope persistent Slot-1 settings to Download Play receiver launches.
-	char tid[4] = {};
-	FILE* file = fopen(conf->ndsPath, "rb");
-	if (!file) return -10;
-	const bool headerRead = !fseek(file, 0xC, SEEK_SET)
-		&& fread(tid, 1, sizeof(tid), file) == sizeof(tid);
-	const bool receiver = headerRead && !memcmp(tid, "HND", 3);
-	fclose(file);
-	if (!headerRead) return -10;
-	if (receiver && conf->dlpSlot1Mode >= 0) {
-		if (conf->dlpSlot1Mode > DLP_SLOT1_VIRTUAL) return -11;
+	if (conf->dlpSessionActive) {
 		session.magic = DLP_SESSION_MAGIC;
 		session.version = DLP_SESSION_VERSION;
 		session.mode = conf->dlpSlot1Mode;
+		dbg_printf("DLP Slot-1 mode: %s\n", session.mode == DLP_SLOT1_PHYSICAL ? "physical"
+			: conf->dlpVirtualSlot1RomPath[0] ? "virtual" : "virtual (empty)");
+		dbg_printf("DLP loader: %s\n", (!dsiFeatures() || conf->b4dsMode) ? "B4DS" : "DSi");
 		if (session.mode == DLP_SLOT1_VIRTUAL && !conf->dlpVirtualSlot1RomPath[0]) {
 			session.flags = DLP_VIRTUAL_SLOT1_EMPTY;
 		} else if (session.mode == DLP_SLOT1_VIRTUAL) {
 			const char* rom = conf->dlpVirtualSlot1RomPath;
 			const char* sav = conf->dlpVirtualSlot1SavPath;
+			dbg_printf("DLP virtual Slot-1 ROM: \"%s\"\n", rom);
+			dbg_printf("DLP virtual Slot-1 save: \"%s\"\n", sav);
 			if ((strncmp(rom, "fat:/", 5) && strncmp(rom, "sd:/", 4))
 			 || (strncmp(sav, "fat:/", 5) && strncmp(sav, "sd:/", 4))) return -12;
 			const bool romOnFlashcard = !strncmp(rom, "fat:/", 5);
@@ -277,19 +273,21 @@ static int writeDlpSession(const configuration* conf) {
 			 || (savStat.st_ino == pageStat.st_ino && saveOnFlashcard == pageOnFlashcard)
 			 || (romStat.st_ino == savStat.st_ino && romOnFlashcard == saveOnFlashcard)) return -14;
 			// Use an existing save without changing its size.
-			file = fopen(sav, "rb+");
+			FILE* file = fopen(sav, "rb+");
 			if (!file) return -15;
 			fclose(file);
 			session.romCluster = romStat.st_ino;
 			session.saveCluster = savStat.st_ino;
 			session.romSize = romStat.st_size;
 			session.saveSize = savStat.st_size;
+			dbg_printf("DLP virtual Slot-1 ROM cluster/size: %lX/%lX\n", session.romCluster, session.romSize);
+			dbg_printf("DLP virtual Slot-1 save cluster/size: %lX/%lX\n", session.saveCluster, session.saveSize);
 		}
 		session.checksum = dlpSessionChecksum(&session);
 		if (!dlpSessionValid(&session)) return -16;
 	}
-	file = fopen(pageFilePath.c_str(), "rb+");
-	if (!file) return (receiver && conf->dlpSlot1Mode >= 0) ? -17 : 0;
+	FILE* file = fopen(pageFilePath.c_str(), "rb+");
+	if (!file) return conf->dlpSessionActive ? -17 : 0;
 	const bool written = !fseek(file, DLP_SESSION_PAGE_OFFSET, SEEK_SET)
 		&& fwrite(&session, 1, sizeof(session), file) == sizeof(session);
 	const int closeStatus = fclose(file);
@@ -637,7 +635,11 @@ static int runNdsFile(configuration* conf) {
 		clusterPageFile = stPage.st_ino;
 	}
 	const int dlpStatus = writeDlpSession(conf);
-	if (dlpStatus) return dlpStatus;
+	if (dlpStatus) {
+		dbg_printf("DLP session preparation failed: %i\n", dlpStatus);
+		return dlpStatus;
+	}
+	if (conf->dlpSessionActive) dbg_printf("DLP session written\n");
 
 	if (stat(sharedFontPath.c_str(), &stTwlFont) >= 0) {
 		clusterTwlFont = stTwlFont.st_ino;

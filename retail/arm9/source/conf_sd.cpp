@@ -852,20 +852,17 @@ int loadFromSD(configuration* conf, const char *bootstrapPath) {
 
 	conf->gameOnFlashcard = (conf->ndsPath[0] == 'f' && conf->ndsPath[1] == 'a' && conf->ndsPath[2] == 't');
 	conf->saveOnFlashcard = (conf->savPath[0] == 'f' && conf->savPath[1] == 'a' && conf->savPath[2] == 't');
-	if (conf->dlpSlot1Mode == 0 || conf->dlpSlot1Mode == 1) {
-		char tid[4] = {};
-		FILE* receiver = fopen(conf->ndsPath, "rb");
-		if (receiver) {
-			fseek(receiver, 0xC, SEEK_SET);
-			if (fread(tid, 1, sizeof(tid), receiver) == sizeof(tid)
-			 && !memcmp(tid, "HND", 3)) {
-				conf->dlpSessionActive = true;
-				conf->dlpVirtualSlot1NeedsDldi = conf->dlpSlot1Mode == 1 && conf->dlpVirtualSlot1RomPath[0]
-					&& (!strncmp(conf->dlpVirtualSlot1RomPath, "fat:/", 5) || !strncmp(conf->dlpVirtualSlot1SavPath, "fat:/", 5));
-			}
-			fclose(receiver);
-		}
-	}
+	char tid[4] = {};
+	FILE* receiver = fopen(conf->ndsPath, "rb");
+	if (!receiver) return -10;
+	const bool headerRead = !fseek(receiver, 0xC, SEEK_SET)
+		&& fread(tid, 1, sizeof(tid), receiver) == sizeof(tid);
+	fclose(receiver);
+	if (!headerRead) return -10;
+	conf->dlpSessionActive = conf->dlpSlot1Mode >= 0 && !memcmp(tid, "HND", 3);
+	if (conf->dlpSessionActive && conf->dlpSlot1Mode > 1) return -11;
+	conf->dlpVirtualSlot1NeedsDldi = conf->dlpSessionActive && conf->dlpSlot1Mode == 1 && conf->dlpVirtualSlot1RomPath[0]
+		&& (!strncmp(conf->dlpVirtualSlot1RomPath, "fat:/", 5) || !strncmp(conf->dlpVirtualSlot1SavPath, "fat:/", 5));
 
 	if (conf->quitPath[0] == 'f' && conf->quitPath[1] == 'a' && conf->quitPath[2] == 't') {
 		conf->valueBits2 |= BIT(6);

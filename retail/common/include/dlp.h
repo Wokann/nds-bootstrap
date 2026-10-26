@@ -45,14 +45,12 @@ typedef struct {
 	u32 saveCluster;
 	u32 romSize;
 	u32 saveSize;
-	u32 generation;
 	u32 reloadCluster;
 	u32 reloadMagic;
-	u32 reserved[4];
 	u32 checksum;
 } DlpSession;
 
-typedef char dlpSessionFits[(sizeof(DlpSession) == 0x40) ? 1 : -1];
+typedef char dlpSessionFits[(sizeof(DlpSession) <= 0x40) ? 1 : -1];
 
 static inline u32 dlpSessionChecksum(const DlpSession* session) {
 	const u8* bytes = (const u8*)session;
@@ -93,7 +91,7 @@ static inline void dlpSetSession(const DlpSession* session, bool downloadedSrl) 
 /* Bootstrap reload resources are prepared before reception. Each received
  * program is patched separately for its SDK. */
 #define DLP_RELOAD_MAGIC 0x31524C44u /* DLR1 */
-#define DLP_RELOAD_SESSION_OFFSET 0x2BFF84
+#define DLP_RELOAD_SESSION_OFFSET (DLP_SESSION_PAGE_OFFSET + offsetof(DlpSession, reloadCluster))
 #define DLP_RELOAD_ARM9_OFFSET 0x200
 #define DLP_RELOAD_ARM7_OFFSET 0x400
 #define DLP_RELOAD_CE9_OFFSET 0x40400
@@ -125,7 +123,7 @@ static inline bool dlpRamBootValid(const u32* header, const DlpRamBoot* boot) {
 		&& (boot->arm9Source >= header[10] || header[10]-boot->arm9Source >= header[11]);
 }
 
-#if defined(ARM9) && !defined(FOTO) && !defined(GSDD) && !defined(NODSIWARE) && !defined(DLP_STAGING_DISABLED)
+#if defined(ARM9) && !defined(FOTO) && !defined(GSDD) && !defined(NODSIWARE) && !defined(EXTMEM) && !defined(DLP_STAGING_DISABLED)
 #define DLP_STAGING_ARM9 1
 #else
 #define DLP_STAGING_ARM9 0

@@ -877,6 +877,9 @@ static void patchReset(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const m
 
 		if (offset) {
 			const u32 handoffTag = (offset[0] == 0xE3A00000) ? DLP_STATION_HANDOFF : 0x4C525344;
+#ifndef LOADERTYPE2
+			if (dlpSessionActive) dbg_printf(handoffTag == DLP_STATION_HANDOFF ? "DLP handoff: Station\n" : "DLP handoff: SDK multiboot\n");
+#endif
 			// Patch
 			if (*(u16*)offset == 0xB510) {
 				offset[0] = 0x49012000; // movs r0, #0; ldr r1, =handoffTag
@@ -3233,6 +3236,9 @@ u32 patchCardNdsArm9(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const mod
 	}
 
 	if (dlpPhysicalSlot1Active || dlpIsInitialReceiver(ndsHeader->gameCode)) {
+#ifndef LOADERTYPE2
+		dbg_printf("DLP ARM9 card functions kept native\n");
+#endif
 		fixForDifferentBios(ce9, ndsHeader, false, usesCloneboot);
 		patchReset(ce9, ndsHeader, moduleParams);
 		return ERR_NONE;
@@ -3242,6 +3248,9 @@ u32 patchCardNdsArm9(cardengineArm9* ce9, const tNDSHeader* ndsHeader, const mod
 		patchCardId(ce9, ndsHeader, moduleParams, false, NULL); // Patch card ID first
 	}
 
+#ifndef LOADERTYPE2
+	if (dlpVirtualSlot1Active) dbg_printf("DLP ARM9 virtual Slot-1 patches\n");
+#endif
 	if (!patchCardRead(ce9, ndsHeader, moduleParams, &usesThumb, &readType, &sdk5ReadType, &cardReadEndOffset, startOffset)) {
 		dbg_printf("ERR_LOAD_OTHR\n\n");
 		return ERR_LOAD_OTHR;

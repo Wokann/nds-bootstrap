@@ -294,7 +294,7 @@ static void driveInitialize(void) {
 		}
 		FAT_InitFiles(false, false);
 	}
-	bool dldiInited = ((valueBits & gameOnFlashcard) && !(valueBits & ROMinRAM)) || (valueBits & (saveOnFlashcard | bootstrapOnFlashcard));
+	bool dldiInited = ((valueBits & gameOnFlashcard) && !(valueBits & ROMinRAM)) || (valueBits & saveOnFlashcard) || ((valueBits & dlpSession) && (valueBits & bootstrapOnFlashcard));
 	if (dldiInited) {
 		FAT_InitFiles(false, true);
 	}
@@ -532,9 +532,6 @@ static void bindDlpSession(void) {
 		const tNDSHeader* virtualHeader = (tNDSHeader*)NDS_HEADER_POKEMON;
 		ce9->romPaddingSize = getRomPaddingSize(virtualHeader->romSize ? virtualHeader->romSize : session.romSize, virtualHeader->deviceSize);
 	}
-	++session.generation;
-	session.checksum = dlpSessionChecksum(&session);
-	writeDlpFile((char*)&session, &pageFile, DLP_SESSION_PAGE_OFFSET, sizeof(session));
 }
 #endif
 

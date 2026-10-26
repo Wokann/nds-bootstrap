@@ -1267,6 +1267,25 @@ int arm7_main(void) {
 			session.magic = 0;
 		}
 		dlpSetSession(&session, srlFromPageFile);
+#ifndef LOADERTYPE2
+		if (dlpSessionActive) {
+			dbg_printf(srlFromPageFile ? "DLP: downloaded SRL\n" : "DLP: initial receiver\n");
+			dbg_printf(session.mode == DLP_SLOT1_PHYSICAL ? "DLP Slot-1: physical\n"
+				: (session.flags & DLP_VIRTUAL_SLOT1_EMPTY) ? "DLP Slot-1: virtual (empty)\n" : "DLP Slot-1: virtual\n");
+			dbg_printf("DLP session flags: ");
+			dbg_hexa(session.flags);
+			dbg_printf("\n");
+			if (dlpVirtualSlot1Active && !dlpVirtualSlot1Empty) {
+				dbg_printf("DLP virtual Slot-1 ROM/save clusters: ");
+				dbg_hexa(session.romCluster);
+				dbg_printf("/");
+				dbg_hexa(session.saveCluster);
+				dbg_printf("\n");
+			}
+		} else if (session.magic == DLP_SESSION_MAGIC) {
+			dbg_printf("DLP session invalid\n");
+		}
+#endif
 		if (dlpVirtualSlot1Active && !dlpVirtualSlot1Empty) {
 			if (session.flags != (DLP_VIRTUAL_SLOT1_ROM_FAT | DLP_VIRTUAL_SLOT1_SAVE_FAT)) errorOutput();
 			storedFileCluster = session.romCluster;
@@ -1277,18 +1296,18 @@ int arm7_main(void) {
 			dataToPreloadAddr = dataToPreloadSize = 0;
 		}
 		if (dlpVirtualSlot1Empty) { saveSize = 0; saveRelocation = true; }
-		if (dlpSessionActive && srlFromPageFile) {
-			if (session.reloadMagic == DLP_RELOAD_MAGIC && session.reloadCluster >= 2
-			 && session.reloadCluster < 0x0FFFFFF0) {
-				aFile reload;
-				getFileFromCluster(&reload, session.reloadCluster);
-				if (fileRead((char*)CARDENGINE_ARM9_LOCATION_BUFFERED, &reload, DLP_RELOAD_CE9_OFFSET, 0x10000) != 0x10000
-					|| fileRead((char*)CARDENGINE_ARM7_LOCATION_BUFFERED, &reload, DLP_RELOAD_CE7_OFFSET, 0x1080) != 0x1080
-					|| fileRead((char*)CHEAT_ENGINE_LOCATION_B4DS_BUFFERED, &reload, DLP_RELOAD_CHEAT_OFFSET, 0x400) != 0x400) errorOutput();
-			}
-			++session.generation;
-			session.checksum = dlpSessionChecksum(&session);
-			if (fileWrite((char*)&session, &sessionFile, DLP_SESSION_PAGE_OFFSET, sizeof(session)) != sizeof(session)) errorOutput();
+		if (dlpSessionActive && srlFromPageFile && session.reloadMagic == DLP_RELOAD_MAGIC
+		 && session.reloadCluster >= 2 && session.reloadCluster < 0x0FFFFFF0) {
+			aFile reload;
+			getFileFromCluster(&reload, session.reloadCluster);
+			if (fileRead((char*)CARDENGINE_ARM9_LOCATION_BUFFERED, &reload, DLP_RELOAD_CE9_OFFSET, 0x10000) != 0x10000
+				|| fileRead((char*)CARDENGINE_ARM7_LOCATION_BUFFERED, &reload, DLP_RELOAD_CE7_OFFSET, 0x1080) != 0x1080
+				|| fileRead((char*)CHEAT_ENGINE_LOCATION_B4DS_BUFFERED, &reload, DLP_RELOAD_CHEAT_OFFSET, 0x400) != 0x400) errorOutput();
+#ifndef LOADERTYPE2
+			dbg_printf("DLP reload cache restored, cluster: ");
+			dbg_hexa(session.reloadCluster);
+			dbg_printf("\n");
+#endif
 		}
 	}
 	// Keep wireless powered until the received SRL reinitializes it.
@@ -1566,7 +1585,7 @@ int arm7_main(void) {
 					} else {
 						dbg_printf("\n");
 					}
-					if (extendedMemory || _io_dldi_size >= 0x0E
+					if (dlpSessionActive || extendedMemory || _io_dldi_size >= 0x0E
 					||	strncmp(romTid, "KII", 3) == 0 // 101 Pinball World
 					||	strncmp(romTid, "KAT", 3) == 0 // AiRace: Tunnel
 					||	strncmp(romTid, "K2Z", 3) == 0 // G.G Series: Altered Weapon
@@ -1714,6 +1733,12 @@ int arm7_main(void) {
 	} else if (_io_dldi_size == 0x0F) {
 		ce9DldiOffset = (extendedMemory ? (maxHeapOpen ? 0x027F6000 : 0x027D8000) : maxHeapOpen ? 0x023F6000 : (laterSdk ? 0x023D8000 : 0x023F7000));
 	}
+	// Keep the DLP boot context clear of 8/16/32 KiB drivers.
+	if (dlpSessionActive && _io_dldi_size >= 0x0D && _io_dldi_size <= 0x0F) {
+		ce9DldiOffset = _io_dldi_size == 0x0D
+			? (extendedMemory ? 0x027FC000 : 0x023FC000)
+			: (extendedMemory ? 0x027E0000 : 0x023E0000) - (1u << _io_dldi_size);
+	}
 	u32 ce9DldiItcm = 0;
 	if (
 	   strncmp(romTid, "KY3", 3) == 0 // Kuniya Burete Sanga Ari: Hills and Rivers Remain
@@ -1734,6 +1759,15 @@ int arm7_main(void) {
 	)) {
 		ce9DldiItcm = 0x01FFC000; // Set <= 16KB DLDI location at ITCM
 	}
+#ifndef LOADERTYPE2
+	if (dlpSessionActive) {
+		dbg_printf("DLP DLDI RAM/ITCM: ");
+		dbg_hexa(ce9DldiOffset);
+		dbg_printf("/");
+		dbg_hexa(ce9DldiItcm);
+		dbg_printf("\n");
+	}
+#endif
 	if (!dldiPatchBinary((data_t*)ce9Location, 0x3800, (data_t*)ce9DldiOffset, (data_t*)ce9DldiItcm)) {
 		dbg_printf("ce9 DLDI patch failed\n");
 		errorOutput();
